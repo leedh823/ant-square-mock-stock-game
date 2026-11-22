@@ -167,6 +167,14 @@
   // DOM 헬퍼
   const $ = (id) => document.getElementById(id);
 
+  function resetOrderQuantityToOne() {
+    uiState.orderQty = 1;
+    const qtyInput = $('input-order-qty');
+    if (qtyInput) {
+      qtyInput.value = '1';
+    }
+  }
+
   function formatWon(num) {
     const n = Number(num) || 0;
     return `${n.toLocaleString('ko-KR')}원`;
@@ -318,6 +326,7 @@
         uiState.inspectingMarketDuringOpening = false;
         if (uiState.lastTradingResetYear !== newState.room.currentYear) {
           uiState.lastTradingResetYear = newState.room.currentYear;
+          resetOrderQuantityToOne();
           uiState.articleNav = 'current_free';
           uiState.selectedFreeArticleId = null;
           uiState.selectedPaidStockId = null;
@@ -589,6 +598,9 @@
       `;
 
       li.addEventListener('click', () => {
+        if (uiState.selectedStockId !== stock.id) {
+          resetOrderQuantityToOne();
+        }
         uiState.selectedStockId = stock.id;
         uiState.showMyInvestment = false;
         uiState.mobileShowDetail = true;
@@ -1009,6 +1021,9 @@
           </div>
         `;
         div.addEventListener('click', () => {
+          if (uiState.selectedStockId !== h.stockId) {
+            resetOrderQuantityToOne();
+          }
           uiState.selectedStockId = h.stockId;
           uiState.showMyInvestment = false;
           uiState.mobileShowDetail = true;
@@ -1060,6 +1075,9 @@
     const listUl = $('article-list-ul');
     if (listUl) {
       uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
+    }
+    if (uiState.selectedStockId !== stockId) {
+      resetOrderQuantityToOne();
     }
     uiState.selectedStockId = stockId;
     uiState.showMyInvestment = false;
@@ -2440,6 +2458,9 @@
         showToast(data.message || '주문 실패', true);
         return data;
       }
+
+      // 주문(매수/매도) 체결 완료 후 수량을 1주로 초기화
+      resetOrderQuantityToOne();
 
       if (data.state) {
         applyServerState(data.state);

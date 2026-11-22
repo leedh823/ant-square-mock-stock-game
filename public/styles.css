@@ -365,12 +365,24 @@ ul {
   transition: border-color 0.15s ease;
 }
 
+.form-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239bb2c0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px 14px;
+  padding-right: 34px !important;
+  cursor: pointer;
+}
+
 .form-input:focus, .form-select:focus {
   border-color: var(--accent-mint);
 }
 
 .form-input-sm {
-  padding: 9px 11px;
+  padding: 9px 12px;
   font-size: 13.5px;
 }
 
@@ -452,7 +464,7 @@ ul {
 
 .friend-create-meta {
   display: grid;
-  grid-template-columns: 1fr 92px;
+  grid-template-columns: 1fr 104px;
   gap: 8px;
 }
 
