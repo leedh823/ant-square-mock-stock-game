@@ -1,0 +1,13 @@
+{
+  "name": "ant-square-mock-stock-game",
+  "version": "1.0.0",
+  "description": "개미광장 - 모의 주식 웹게임 (2010 첫 거래 ~ 2012 개장 및 2020 최종 정산)",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node verify.js"
+  }
+}

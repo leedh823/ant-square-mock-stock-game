@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>개미광장 - 모의 주식 웹게임</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- 연결 복구 중 배너 (기획서 11쪽) -->
+  <div id="reconnect-banner" class="reconnect-banner hidden" role="status" aria-live="polite">
+    <span class="reconnect-dot"></span>
+    <span>연결을 복구하는 중입니다. 서버 시각과 자산 상태를 동기화하고 있습니다...</span>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- =====================================================================
+       01. 입장과 모드 선택 화면 (기획서 8쪽, 웹/모바일 시안 01)
+       ===================================================================== -->
+  <section id="screen-entry" class="screen screen-entry active">
+    <header class="top-brand-bar">
+      <div class="brand-logo">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+          </svg>
+        </span>
+        <span class="brand-text">개미광장</span>
+      </div>
+      <button type="button" id="btn-open-guide-entry" class="btn-pill-outline">게임 방법</button>
+    </header>
+
+    <div class="entry-layout">
+      <div class="entry-card">
+        <p class="eyebrow-mint">모의 주식 게임</p>
+        <h1 class="entry-title">개미광장</h1>
+        <p class="entry-subtitle">
+          뉴스를 읽고 가상 주식을 거래하세요.<br />
+          10년 뒤 가장 많은 자산을 남겨보세요.
+        </p>
+
+        <!-- 닉네임 입력 -->
+        <div class="form-group">
+          <label for="input-nickname" class="form-label">닉네임</label>
+          <input
+            type="text"
+            id="input-nickname"
+            class="form-input"
+            placeholder="닉네임 입력 (2~12자, 예: 서윤 / 준호)"
+            maxlength="12"
+            autocomplete="off"
+          />
+          <p id="nickname-error" class="form-error hidden"></p>
+        </div>
+
+        <!-- 1인 / 친구방 모드 선택 카드 -->
+        <div class="mode-grid" role="radiogroup" aria-label="플레이 모드 선택">
+          <button type="button" id="mode-card-solo" class="mode-card" data-mode="solo">
+            <span class="mode-tag">1인</span>
+            <strong class="mode-title">혼자 투자하기</strong>
+            <span class="mode-desc">봇 3명과 플레이</span>
+          </button>
+
+          <button type="button" id="mode-card-friend" class="mode-card selected" data-mode="friend">
+            <span class="mode-tag">친구방</span>
+            <strong class="mode-title">친구와 투자하기</strong>
+            <span class="mode-desc">방 만들기 · 코드로 참여</span>
+          </button>
+        </div>
+
+        <!-- 친구와 플레이 설정 영역 (기획서 8쪽: 방 만들기와 코드로 참여를 같은 화면에 노출) -->
+        <div id="friend-mode-panel" class="friend-mode-panel">
+          <div class="friend-sub-boxes">
+            <!-- 코드로 참여 입력 -->
+            <div class="friend-box">
+              <label for="input-join-code" class="form-label-sm">방 코드로 참여</label>
+              <input
+                type="text"
+                id="input-join-code"
+                class="form-input form-input-code"
+                placeholder="6자리 코드 (예: K7M2Q9)"
+                maxlength="6"
+                autocomplete="off"
+              />
+            </div>
+
+            <!-- 방 만들기 옵션 (방 이름·정원) -->
+            <div class="friend-box">
+              <div class="friend-create-meta">
+                <div class="meta-col-name">
+                  <label for="input-room-name" class="form-label-sm">방 이름 (만들기용)</label>
+                  <input
+                    type="text"
+                    id="input-room-name"
+                    class="form-input form-input-sm"
+                    placeholder="개미광장 친구방"
+                    maxlength="24"
+                    autocomplete="off"
+                  />
+                </div>
+                <div class="meta-col-cap">
+                  <label for="select-room-capacity" class="form-label-sm">정원</label>
+                  <select id="select-room-capacity" class="form-select form-input-sm">
+                    <option value="2">2명</option>
+                    <option value="3">3명</option>
+                    <option value="4" selected>4명</option>
+                    <option value="5">5명</option>
+                    <option value="6">6명</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p id="entry-action-error" class="form-error hidden"></p>
+
+          <div class="entry-btn-row">
+            <button type="button" id="btn-join-room" class="btn-secondary">코드로 참여</button>
+            <button type="button" id="btn-create-room" class="btn-primary">방 만들기</button>
+          </div>
+        </div>
+
+        <!-- 1인 모드 준비 영역 (기획서 8쪽: 내 닉네임과 상대 봇 목록, 시작 버튼) -->
+        <div id="solo-mode-panel" class="solo-mode-panel hidden">
+          <div class="solo-bots-box">
+            <div class="solo-bots-header">함께 경쟁할 상대 봇 (3명)</div>
+            <div class="solo-bots-list">
+              <span class="bot-chip"><strong>서윤(봇)</strong> · 조사 후 집중형</span>
+              <span class="bot-chip"><strong>준호(봇)</strong> · 공개 뉴스 분산형</span>
+              <span class="bot-chip"><strong>민지(봇)</strong> · 현금 비중 관리형</span>
+            </div>
+          </div>
+          <p id="solo-action-error" class="form-error hidden"></p>
+          <button type="button" id="btn-start-solo" class="btn-primary btn-full">1인 모드 시작하기</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       02. 친구방 대기 화면 (기획서 8쪽, 웹/모바일 시안 02)
+       ===================================================================== -->
+  <section id="screen-waiting" class="screen hidden">
+    <header class="top-brand-bar">
+      <div class="brand-logo">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+          </svg>
+        </span>
+        <span class="brand-text">개미광장</span>
+      </div>
+      <button type="button" id="btn-leave-waiting" class="btn-pill-outline">나가기</button>
+    </header>
+
+    <div class="center-panel-wrap">
+      <div class="waiting-card">
+        <div class="waiting-header">
+          <p class="eyebrow-mint" id="waiting-room-name-label">친구방 대기</p>
+          <h2 class="panel-title">개장 준비</h2>
+          <p class="panel-subtitle">친구에게 방 코드를 공유하세요. 방장이 시작하면 모든 참가자가 같은 시세와 마감 시간을 공유합니다.</p>
+        </div>
+
+        <div class="waiting-grid">
+          <!-- 왼쪽: 방 코드 카드 -->
+          <div class="waiting-code-box">
+            <div class="box-top-row">
+              <span class="box-label">방 코드</span>
+              <span id="waiting-count-badge" class="box-count">1 / 4명</span>
+            </div>
+            <div id="waiting-room-code" class="room-code-display">------</div>
+            <button type="button" id="btn-copy-code" class="btn-secondary btn-full">코드 복사</button>
+          </div>
+
+          <!-- 오른쪽: 참가자 목록 카드 -->
+          <div class="waiting-participants-box">
+            <div class="box-top-row">
+              <span class="box-label">참가자</span>
+              <span class="box-sub-hint">같은 시세 · 마감 시간 공유</span>
+            </div>
+            <ul id="waiting-participants-list" class="participants-list"></ul>
+          </div>
+        </div>
+
+        <div class="waiting-footer">
+          <p id="waiting-status-hint" class="waiting-hint"></p>
+          <button type="button" id="btn-start-game" class="btn-primary btn-large">게임 시작</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       03. 튜토리얼과 건너뛰기 화면 (기획서 8쪽, 웹/모바일 시안 03)
+       ===================================================================== -->
+  <section id="screen-tutorial" class="screen hidden">
+    <header class="top-brand-bar">
+      <div class="brand-logo">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+          </svg>
+        </span>
+        <span class="brand-text">개미광장</span>
+      </div>
+      <div class="top-bar-right-group">
+        <span id="tutorial-timer-badge" class="timer-pill">00:45</span>
+        <button type="button" id="btn-open-guide-tutorial" class="btn-pill-outline">게임 방법</button>
+      </div>
+    </header>
+
+    <div class="center-panel-wrap">
+      <div class="tutorial-card">
+        <p class="eyebrow-mint">게임 시작 전</p>
+        <h2 class="panel-title">투자 방법</h2>
+        <p class="panel-subtitle">4가지 규칙을 확인하고 첫 거래를 시작하세요.</p>
+
+        <div class="tutorial-rules-grid">
+          <div class="rule-item">
+            <span class="rule-num">01</span>
+            <div class="rule-body">
+              <strong class="rule-title">기사 읽기</strong>
+              <p class="rule-desc">무료 기사로 단서를 찾고, 필요하면 가상 현금으로 유료 기사를 사요.</p>
+            </div>
+          </div>
+
+          <div class="rule-item">
+            <span class="rule-num">02</span>
+            <div class="rule-body">
+              <strong class="rule-title">주식 거래</strong>
+              <p class="rule-desc">시장 탭에서 종목과 수량을 고르고 시간이 끝나기 전에 주문해요.</p>
+            </div>
+          </div>
+
+          <div class="rule-item">
+            <span class="rule-num">03</span>
+            <div class="rule-body">
+              <strong class="rule-title">새해 개장</strong>
+              <p class="rule-desc">다음 해 개장 때 바뀐 주가와 내 투자 결과를 확인해요.</p>
+            </div>
+          </div>
+
+          <div class="rule-item">
+            <span class="rule-num">04</span>
+            <div class="rule-body">
+              <strong class="rule-title">최종 순위</strong>
+              <p class="rule-desc">2020년 정산에서 보유 현금과 주식 평가액을 합산해요.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="tutorial-footer">
+          <p id="tutorial-ready-status" class="tutorial-ready-text"></p>
+          <div class="tutorial-btn-row">
+            <button type="button" id="btn-tutorial-skip" class="btn-secondary">건너뛰기</button>
+            <button type="button" id="btn-tutorial-confirm" class="btn-primary">확인</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       04 ~ 09. 메인 거래 화면 (시장 · 기사 · 채팅 독립 탭, 기획서 9쪽)
+       ===================================================================== -->
+  <section id="screen-trading" class="screen hidden">
+    <!-- 상단 공통 상태 바 (현재 연도, 남은 시간, 거래 가능 현금, 총자산, 내 직전 순위) -->
+    <header class="trading-top-bar">
+      <div class="trading-top-left">
+        <div class="brand-logo-compact">
+          <span class="brand-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+              <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+              <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+            </svg>
+          </span>
+          <span class="brand-text-sm">개미광장</span>
+        </div>
+
+        <div class="year-round-box">
+          <strong id="top-year-label" class="top-year">2010년</strong>
+          <span id="top-round-label" class="top-round">1 / 10</span>
+        </div>
+
+        <div class="timer-group">
+          <span id="trading-timer-pill" class="timer-pill">00:45</span>
+          <button type="button" id="btn-trading-ready" class="btn-ready-compact" title="참가자 전원이 누르면 남은 시간을 기다리지 않고 즉시 마감하고 다음 해를 개장합니다.">
+            마감 준비
+          </button>
+          <button type="button" id="btn-back-to-opening" class="btn-opening-return hidden">
+            개장 결과 보기
+          </button>
+        </div>
+      </div>
+
+      <div class="trading-top-right">
+        <div class="asset-metric metric-rank">
+          <span class="metric-label">직전 순위</span>
+          <strong id="top-my-rank" class="metric-value">1위</strong>
+        </div>
+        <div class="asset-metric metric-total">
+          <span class="metric-label">총자산</span>
+          <strong id="top-total-assets" class="metric-value">500,000원</strong>
+        </div>
+        <div class="asset-metric metric-cash">
+          <span class="metric-label">거래 가능 현금</span>
+          <strong id="top-available-cash" class="metric-value highlight-cash">500,000원</strong>
+        </div>
+      </div>
+    </header>
+
+    <!-- 데스크톱 상단 탭 바 (시장 · 기사 · 채팅 + 내 투자) -->
+    <nav class="desktop-tab-bar" aria-label="메인 기능 탭">
+      <div class="tab-left-group">
+        <button type="button" class="main-tab-btn active" data-tab="market">시장</button>
+        <button type="button" class="main-tab-btn" data-tab="articles">
+          기사
+          <span id="tab-article-badge" class="tab-badge hidden">5</span>
+        </button>
+        <button type="button" class="main-tab-btn" data-tab="chat">
+          채팅
+          <span id="tab-chat-badge" class="tab-badge hidden">N</span>
+        </button>
+      </div>
+      <div class="tab-right-group">
+        <span id="room-code-mini-chip" class="room-code-chip">방 코드: ------</span>
+        <button type="button" id="btn-toggle-my-investment" class="btn-pill-outline">내 투자</button>
+      </div>
+    </nav>
+
+    <!-- 탭 본문 컨테이너 -->
+    <main class="trading-main-container">
+      <!-- ==================== 탭 1: 시장 (종목 목록 + 종목 상세 / 내 투자) ==================== -->
+      <div id="tab-panel-market" class="tab-panel active">
+        <div class="market-grid">
+          <!-- 왼쪽: 10종목 목록 -->
+          <div id="market-list-col" class="market-list-card">
+            <div class="card-section-header">
+              <h2 class="section-title">시장</h2>
+              <div class="section-header-right">
+                <span class="stock-count-label">10종목</span>
+                <button type="button" id="btn-mobile-my-investment" class="btn-link-mint mobile-only">내 투자</button>
+              </div>
+            </div>
+
+            <div class="stock-table-header">
+              <span class="col-name">종목</span>
+              <span class="col-price">현재가</span>
+              <span class="col-change">등락</span>
+              <span class="col-hold">보유</span>
+            </div>
+
+            <ul id="stock-list-ul" class="stock-list-ul" role="listbox" aria-label="가상 종목 10개 목록"></ul>
+
+            <div id="market-2010-notice" class="market-footer-notice">
+              기사는 2011년 개장에 공개됩니다.
+            </div>
+          </div>
+
+          <!-- 오른쪽 A: 종목 상세 및 매수·매도 주문 -->
+          <div id="market-detail-col" class="market-detail-card">
+            <div class="mobile-detail-topbar mobile-only">
+              <button type="button" id="btn-mobile-back-to-list" class="btn-back-link">← 종목 목록</button>
+              <button type="button" id="btn-mobile-detail-my-inv" class="btn-link-mint">내 투자</button>
+            </div>
+
+            <div class="detail-header">
+              <div class="detail-header-top">
+                <span class="detail-eyebrow">종목 상세</span>
+                <span id="detail-industry-chip" class="industry-chip">엔터</span>
+              </div>
+              <h3 id="detail-stock-name" class="detail-stock-name">A엔터</h3>
+              <p id="detail-public-business" class="detail-business">아티스트 기획·공연·음반</p>
+
+              <div class="detail-price-row">
+                <strong id="detail-current-price" class="detail-price">20,000원</strong>
+                <span id="detail-change-badge" class="detail-change-badge neutral">첫 거래</span>
+              </div>
+
+              <!-- 내 보유 현황 요약 -->
+              <div class="detail-holding-bar">
+                <span>내 보유 수량: <strong id="detail-my-qty">0주</strong></span>
+                <span>평가액: <strong id="detail-my-eval">0원</strong></span>
+                <span id="detail-my-avg-wrap" class="hidden">평균 매수가: <strong id="detail-my-avg">0원</strong></span>
+              </div>
+
+              <!-- 내 추리 태그 & 한줄 메모 (숨겨진 회사 후보 및 호재/악재 추리 표시) -->
+              <div class="detail-deduction-box">
+                <div class="deduction-top-row">
+                  <span class="deduction-label">내 추리 태그</span>
+                  <div id="detail-deduction-tags" class="deduction-tags-row"></div>
+                </div>
+                <div class="deduction-memo-row">
+                  <input
+                    type="text"
+                    id="input-deduction-memo"
+                    class="deduction-memo-input"
+                    placeholder="단서 메모 입력 (예: 2011 대사질환 채용 -> 비만신약 주인 유력)"
+                    maxlength="80"
+                    autocomplete="off"
+                  />
+                </div>
+              </div>
+
+              <!-- 종목 상세 내부 뷰 전환 (주문·가격 차트 vs 종목별 단서 타임라인) -->
+              <div class="detail-subview-switch" role="tablist">
+                <button type="button" id="btn-detail-view-order" class="detail-subview-btn active" data-subview="order">
+                  주문 · 가격 추이
+                </button>
+                <button type="button" id="btn-detail-view-timeline" class="detail-subview-btn" data-subview="timeline">
+                  단서 타임라인 <span id="detail-timeline-count" class="timeline-count-chip">0</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 서브뷰 1: 과거 가격 추이 + 매수/매도 주문 폼 -->
+            <div id="detail-order-subview">
+              <!-- 과거 가격 추이 영역 (2010년은 기준가 안내, 2011년~은 라인 차트) -->
+              <div id="detail-chart-box" class="detail-chart-box"></div>
+
+              <!-- 매수 / 매도 전환 탭 -->
+              <div class="order-side-tabs" role="tablist">
+                <button type="button" id="btn-side-buy" class="order-side-btn active-buy" data-side="BUY">매수</button>
+                <button type="button" id="btn-side-sell" class="order-side-btn" data-side="SELL">매도</button>
+              </div>
+
+              <!-- 수량 입력 및 빠른 수량 버튼 -->
+              <div class="order-form-area">
+                <div class="qty-row">
+                  <label for="input-order-qty" class="qty-label">수량</label>
+                  <div class="qty-stepper">
+                    <button type="button" id="btn-qty-minus" class="qty-step-btn" aria-label="1주 감소">−</button>
+                    <input
+                      type="number"
+                      id="input-order-qty"
+                      class="qty-input"
+                      min="1"
+                      step="1"
+                      value="1"
+                    />
+                    <span class="qty-unit">주</span>
+                    <button type="button" id="btn-qty-plus" class="qty-step-btn" aria-label="1주 증가">+</button>
+                  </div>
+                </div>
+
+                <div class="qty-quick-row">
+                  <button type="button" class="qty-chip" data-qty="1">1주</button>
+                  <button type="button" class="qty-chip" data-qty="10">10주</button>
+                  <button type="button" class="qty-chip" data-qty="20">20주</button>
+                  <button type="button" class="qty-chip" data-qty="40">40주</button>
+                  <button type="button" id="btn-qty-max" class="qty-chip qty-chip-max">최대 가능 수량</button>
+                </div>
+
+                <div class="order-calc-box">
+                  <div class="calc-row">
+                    <span id="calc-max-label">최대 가능 수량</span>
+                    <strong id="calc-max-qty">25주</strong>
+                  </div>
+                  <div class="calc-row">
+                    <span>예상 주문 금액</span>
+                    <strong id="calc-order-amount">20,000원</strong>
+                  </div>
+                  <div class="calc-row">
+                    <span>주문 후 현금</span>
+                    <strong id="calc-cash-after">480,000원</strong>
+                  </div>
+                </div>
+
+                <!-- 잔고 부족, 수량 초과, 마감, 연결 복구 중 텍스트 구분 표시 (기획서 9쪽) -->
+                <p id="order-status-text" class="order-status-text hidden"></p>
+
+                <button type="button" id="btn-submit-order" class="btn-primary btn-full btn-order-submit">
+                  매수 주문
+                </button>
+              </div>
+            </div>
+
+            <!-- 서브뷰 2: 종목별 단서 타임라인 (연도별 개장 변동 이유 + 관련 무료 기사 + 내 구매 유료 단서 모아보기) -->
+            <div id="detail-timeline-subview" class="detail-timeline-subview hidden">
+              <div id="detail-timeline-list" class="detail-timeline-list"></div>
+            </div>
+          </div>
+
+          <!-- 오른쪽 B: 내 투자 화면 (현금, 주식 평가액 합계, 종목별 보유·평균매수가·미실현손익, 주문/기사 결제 내역) -->
+          <div id="market-portfolio-col" class="market-portfolio-card hidden">
+            <div class="card-section-header">
+              <div>
+                <span class="detail-eyebrow">내 포트폴리오</span>
+                <h3 class="section-title">내 투자</h3>
+              </div>
+              <button type="button" id="btn-close-my-investment" class="btn-pill-outline">종목 상세로</button>
+            </div>
+
+            <div class="portfolio-summary-grid">
+              <div class="pf-stat-box">
+                <span class="pf-stat-label">보유 현금</span>
+                <strong id="pf-cash" class="pf-stat-val">500,000원</strong>
+              </div>
+              <div class="pf-stat-box">
+                <span class="pf-stat-label">주식 평가액 합계</span>
+                <strong id="pf-stock-eval" class="pf-stat-val">0원</strong>
+              </div>
+              <div class="pf-stat-box">
+                <span class="pf-stat-label">총자산</span>
+                <strong id="pf-total-assets" class="pf-stat-val highlight-mint">500,000원</strong>
+              </div>
+            </div>
+
+            <div class="pf-section">
+              <h4 class="pf-subtitle">보유 종목 (선택 시 주문 화면으로 이동)</h4>
+              <div id="pf-holdings-list" class="pf-holdings-list"></div>
+            </div>
+
+            <div class="pf-section">
+              <h4 class="pf-subtitle">내 주문 및 유료 기사 결제 내역</h4>
+              <div id="pf-history-list" class="pf-history-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 탭 2: 기사 (무료 기사 5개 + 유료 기사 상점/열람) ==================== -->
+      <div id="tab-panel-articles" class="tab-panel hidden">
+        <div class="articles-grid">
+          <!-- 왼쪽: 기사 목록 -->
+          <div id="articles-list-col" class="articles-list-card">
+            <div class="card-section-header">
+              <h2 id="articles-year-heading" class="section-title">2011년 기사</h2>
+              <div id="articles-year-tabs" class="year-archive-pills"></div>
+            </div>
+
+            <div class="article-type-switch" role="tablist">
+              <button type="button" id="btn-art-tab-free" class="art-switch-btn active" data-art-type="free">
+                무료 기사 5
+              </button>
+              <button type="button" id="btn-art-tab-paid" class="art-switch-btn" data-art-type="paid">
+                유료 기사
+              </button>
+            </div>
+
+            <!-- 업종·장기 사건·구매 단서 필터 바 (숨겨진 회사는 업종 단위로만 묶여 조기 노출 방지 - 기획서 5쪽) -->
+            <div id="articles-filter-bar" class="articles-filter-bar">
+              <button type="button" class="art-filter-chip active" data-filter="ALL">전체</button>
+              <button type="button" class="art-filter-chip" data-filter="OWNED">내 구매 단서</button>
+              <button type="button" class="art-filter-chip" data-filter="ARC">장기 사건(2~6년)</button>
+              <button type="button" class="art-filter-chip" data-filter="바이오">바이오</button>
+              <button type="button" class="art-filter-chip" data-filter="반도체">반도체</button>
+              <button type="button" class="art-filter-chip" data-filter="조선">조선</button>
+              <button type="button" class="art-filter-chip" data-filter="엔터">엔터</button>
+              <button type="button" class="art-filter-chip" data-filter="OTHER">식품·게임·항공</button>
+            </div>
+
+            <div id="paid-price-banner" class="paid-price-banner hidden">
+              <span>올해 유료 기사 공통 가격</span>
+              <strong id="paid-common-price-label">11,000원</strong>
+            </div>
+
+            <ul id="article-list-ul" class="article-list-ul"></ul>
+          </div>
+
+          <!-- 오른쪽: 기사 본문 읽기 및 유료 기사 구매 확인 -->
+          <div id="articles-reader-col" class="articles-reader-card">
+            <div class="mobile-detail-topbar mobile-only">
+              <button type="button" id="btn-mobile-back-to-articles" class="btn-back-link">← 기사 목록</button>
+            </div>
+            <div id="article-reader-content" class="article-reader-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 탭 3: 채팅 (전체 방 + 1:1 대화, 기획서 17쪽) ==================== -->
+      <div id="tab-panel-chat" class="tab-panel hidden">
+        <div class="chat-grid">
+          <!-- 왼쪽: 전체 방 및 1:1 참가자 선택 -->
+          <div class="chat-sidebar-card">
+            <h2 class="section-title">채팅</h2>
+            <button type="button" id="btn-chat-channel-all" class="chat-channel-btn active">
+              전체 방
+            </button>
+
+            <div class="chat-dm-section">
+              <span class="chat-dm-label">1:1 대화</span>
+              <ul id="chat-dm-participants-ul" class="chat-dm-list"></ul>
+            </div>
+          </div>
+
+          <!-- 오른쪽: 대화창 -->
+          <div class="chat-room-card">
+            <div class="chat-room-header">
+              <strong id="chat-header-title">전체 방</strong>
+              <span id="chat-header-sub" class="chat-header-sub">같은 방 참가자 전원에게 보입니다</span>
+            </div>
+
+            <div id="chat-messages-box" class="chat-messages-box"></div>
+
+            <form id="form-chat-send" class="chat-input-row">
+              <input
+                type="text"
+                id="input-chat-text"
+                class="form-input chat-input"
+                placeholder="메시지 입력 (기사 해석, 매수 판단, 다음 개장 예상 등)"
+                maxlength="300"
+                autocomplete="off"
+              />
+              <button type="submit" class="btn-primary btn-chat-send">전송</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 모바일 하단 고정 탭 바 (기획서 9쪽: 모바일은 화면 하단에 탭을 둔다) -->
+    <nav class="mobile-bottom-nav mobile-only" aria-label="모바일 하단 탭">
+      <button type="button" class="mobile-nav-btn active" data-tab="market">시장</button>
+      <button type="button" class="mobile-nav-btn" data-tab="articles">기사</button>
+      <button type="button" class="mobile-nav-btn" data-tab="chat">채팅</button>
+    </nav>
+  </section>
+
+  <!-- =====================================================================
+       10. 연도별 개장 결과 및 2012년 개장 정산 화면 (기획서 7쪽, 10쪽, 시안 10)
+       ===================================================================== -->
+  <section id="screen-opening" class="screen hidden">
+    <header class="top-brand-bar">
+      <div class="brand-logo">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+          </svg>
+        </span>
+        <span class="brand-text">개미광장</span>
+      </div>
+      <div class="top-bar-right-group">
+        <span id="opening-timer-badge" class="timer-pill hidden">00:08</span>
+        <span id="opening-type-badge" class="status-pill">개장 결과</span>
+      </div>
+    </header>
+
+    <div class="opening-scroll-wrap">
+      <div class="opening-card">
+        <p id="opening-round-eyebrow" class="eyebrow-mint">라운드 3 / 10</p>
+        <h2 id="opening-year-title" class="opening-title">2012년 개장</h2>
+        <p id="opening-subtitle" class="opening-subtitle">전년 거래 결과 · 연간 자금 지급 전</p>
+
+        <!-- 대표 보유 종목 / 주요 변동 종목 하이라이트 카드 -->
+        <div id="opening-highlight-card" class="opening-highlight-card"></div>
+
+        <!-- 내 핵심 지표 3칸 (지급 전 내 총자산, 연도 투자 순손익, 내 순위) -->
+        <div class="opening-metrics-grid">
+          <div class="opening-metric-box">
+            <span class="om-label">내 총자산 (지급 전)</span>
+            <strong id="opening-my-pre-assets" class="om-value">0원</strong>
+          </div>
+          <div class="opening-metric-box">
+            <span class="om-label">투자 순손익</span>
+            <strong id="opening-my-net-pnl" class="om-value">0원</strong>
+          </div>
+          <div class="opening-metric-box">
+            <span class="om-label">내 순위</span>
+            <strong id="opening-my-rank" class="om-value">-위</strong>
+          </div>
+        </div>
+
+        <!-- 내 자산 산출 내역 (보유 현금 + 주식 평가액 = 지급 전 총자산 -> 새해 지원금 +50,000원 -> 지급 후 총자산) -->
+        <div id="opening-my-breakdown" class="opening-breakdown-box"></div>
+
+        <!-- 참가자별 자산 비교표 (2015년 중간 점검에서만 전체 순위표 공개, 일반 연도에는 비공개 안내 표시 - 기획서 10·11쪽) -->
+        <div id="opening-leaderboard-block" class="opening-section-block">
+          <div class="opening-block-header">
+            <h3 id="opening-leaderboard-title" class="opening-block-title">2015년 중간 점검 전체 참가자 순위표</h3>
+            <span id="opening-leader-note" class="opening-leader-note">연간 자금 지급 전 스냅샷</span>
+          </div>
+          <div id="opening-participants-table-wrap" class="opening-table-wrap"></div>
+        </div>
+
+        <!-- 10종목 개장 시세 및 변동 이유 표 (기획서 7쪽, 10쪽) -->
+        <div class="opening-section-block">
+          <div class="opening-block-header">
+            <h3 class="opening-block-title">10종목 개장 시세 및 변동 이유</h3>
+            <span class="opening-sub-badge">확정 시세 반영</span>
+          </div>
+          <div id="opening-stocks-table-wrap" class="opening-table-wrap"></div>
+        </div>
+
+        <!-- 하단 다음 거래 현금 및 이동 버튼 -->
+        <div class="opening-footer-bar">
+          <div class="opening-footer-info">
+            <span id="opening-next-cash-label">다음 거래 현금 0원</span>
+            <span id="opening-post-grant-label" class="opening-post-grant-sub">지급 후 시작 총자산 0원</span>
+          </div>
+          <div class="opening-footer-actions">
+            <button type="button" id="btn-opening-inspect-market" class="btn-secondary">
+              개장 시장·내 투자 확인
+            </button>
+            <button type="button" id="btn-opening-next-trading" class="btn-primary">
+              2012년 거래
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =====================================================================
+       11 & 12. 2020년 최종 정산 화면 (기획서 10쪽, 웹/모바일 시안 11·12)
+       ===================================================================== -->
+  <section id="screen-settlement" class="screen hidden">
+    <header class="top-brand-bar">
+      <div class="brand-logo">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="13" width="3.5" height="7" rx="1" fill="#062019"/>
+            <rect x="10.25" y="9" width="3.5" height="11" rx="1" fill="#062019"/>
+            <rect x="16.5" y="5" width="3.5" height="15" rx="1" fill="#062019"/>
+          </svg>
+        </span>
+        <span class="brand-text">개미광장</span>
+      </div>
+      <span class="status-pill">게임 종료</span>
+    </header>
+
+    <div class="opening-scroll-wrap">
+      <div class="settlement-card">
+        <p class="eyebrow-mint">10년간의 투자 결과</p>
+        <h2 class="opening-title">2020년 최종 정산</h2>
+        <p class="opening-subtitle">현금과 보유 주식 평가액을 합산한 최종 순위</p>
+
+        <!-- 1위 WIN 배너 또는 최종 순위 배너 -->
+        <div id="settlement-hero-box" class="settlement-hero-box"></div>
+
+        <!-- 전체 참가자 최종 순위표 -->
+        <div id="settlement-leaderboard" class="settlement-leaderboard"></div>
+
+        <!-- 내 투자 복기 (최종 순위표 바로 아래에 내 거래와 연결된 사례 최대 3개 표시) -->
+        <div id="settlement-trade-reviews-block" class="opening-section-block">
+          <div class="opening-block-header">
+            <h3 class="opening-block-title">내 투자 복기</h3>
+            <span class="opening-sub-badge">내 거래와 당시 단서 · 개장 결과 비교 (최대 3건)</span>
+          </div>
+          <div id="settlement-trade-reviews-wrap" class="trade-reviews-wrap"></div>
+        </div>
+
+        <!-- 내 보유 종목별 최종 평가 결과 (기획서 2쪽) -->
+        <div class="opening-section-block">
+          <h3 class="opening-block-title">내 보유 종목별 최종 평가 결과</h3>
+          <div id="settlement-my-holdings-wrap" class="opening-table-wrap"></div>
+        </div>
+
+        <!-- 이번 판의 다년도(2~6년) 장기 사건 결말 및 주요 변동 경과 (기획서 2쪽, 6쪽) -->
+        <div id="settlement-arcs-block" class="opening-section-block">
+          <h3 class="opening-block-title">이번 판의 주요 장기 사건(2~6년) 및 결말</h3>
+          <div id="settlement-arcs-wrap" class="opening-table-wrap"></div>
+        </div>
+
+        <!-- 2020년 최종 종목별 시세 및 결과 -->
+        <div class="opening-section-block">
+          <h3 class="opening-block-title">2020년 최종 종목 시세 및 변동 이유</h3>
+          <div id="settlement-stocks-wrap" class="opening-table-wrap"></div>
+        </div>
+
+        <div class="settlement-footer-btns">
+          <button type="button" id="btn-settlement-home" class="btn-secondary">홈으로</button>
+          <button type="button" id="btn-settlement-replay" class="btn-primary">다시 플레이</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 게임 방법 안내 모달 -->
+  <div id="modal-guide" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-guide-title">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-guide-title">개미광장 게임 규칙 안내</h3>
+        <button type="button" id="btn-close-guide" class="btn-modal-close" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <ul class="guide-list">
+          <li><strong>기초 및 연간 자금:</strong> 2010년 기초 자금 500,000원으로 시작하며, 2011~2019년 개장마다 연간 지원금 50,000원이 지급됩니다.</li>
+          <li><strong>무료 기사와 유료 단서:</strong> 2010년은 기사 없이 거래합니다. 2011년부터 해마다 무료 기사 5개가 동시에 공개되며, 유료 기사는 올해 공통 가격(지급 후 총자산 중앙값×2%, 1,000원 단위 내림)으로 구매할 수 있습니다.</li>
+          <li><strong>시세와 정산:</strong> 한 해의 거래 가격은 고정되며, 다음 해 개장 때 바뀐 주가가 반영됩니다. 개장 순위는 연간 자금 지급 전 총자산으로 계산합니다.</li>
+          <li><strong>연도 투자 순손익:</strong> <code>해당 개장 지급 전 총자산 − 직전 연도 지급 후 시작 총자산</code>으로 계산하며 유료 기사 구매 비용이 반영됩니다.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-confirm-guide" class="btn-primary btn-full">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+*.log
+npm-debug.log*
+*.docx
+*.pdf
+개미광장_*_프로토타입_화면흐름.png
