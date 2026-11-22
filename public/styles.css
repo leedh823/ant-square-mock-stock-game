@@ -2902,3 +2902,358 @@ ul {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   1차 UI 개선: 거래 공통 헤더 · 기사 탭(올해 기사 / 유료 단서 / 보관함) · 종목별 한 줄
+   ========================================================================== */
+
+body,
+.screen {
+  overflow-x: hidden;
+}
+
+/* 거래 중 배경 대비를 낮춰 시세와 기사 가독성 향상 */
+#screen-trading {
+  background: #07121a;
+  background-image: none;
+}
+
+.trading-top-bar {
+  background: #08151e;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.trading-top-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.trading-top-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.metric-cash .metric-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.metric-cash .metric-value {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--accent-mint);
+}
+
+/* 내 투자 4칸 요약 (총자산, 직전 순위, 거래 가능 현금, 주식 평가액 합계) */
+.portfolio-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+/* 기사에서 관련 종목 보기로 넘어왔을 때 복귀 바 */
+.detail-return-article-bar {
+  margin-bottom: 12px;
+}
+
+.btn-back-article-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(79, 227, 181, 0.12);
+  border: 1px solid rgba(79, 227, 181, 0.38);
+  color: var(--accent-mint);
+  font-size: 12.5px;
+  font-weight: 800;
+  transition: all 0.14s ease;
+}
+
+.btn-back-article-pill:hover {
+  background: var(--accent-mint);
+  color: #052018;
+}
+
+/* 기사 탭 3분할 내부 탐색 (올해 기사 / 유료 단서 / 보관함) */
+.article-nav-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: #09151e;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+  gap: 4px;
+}
+
+.art-nav-btn {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-secondary);
+  text-align: center;
+  transition: all 0.14s ease;
+}
+
+.art-nav-btn:hover {
+  color: var(--text-primary);
+}
+
+.art-nav-btn.active {
+  background: #15313e;
+  color: var(--accent-mint);
+}
+
+/* 보관함 전용 컨트롤 (연도 선택 + 필터 바) */
+.articles-archive-controls {
+  background: #09161f;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.articles-archive-controls .articles-filter-bar {
+  margin-bottom: 0;
+}
+
+/* 올해 기사 제목 자연스러운 줄바꿈 및 가독성 강화 */
+.art-item-title,
+.reader-headline {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.free-headline-card .art-item-title {
+  font-size: 15.5px;
+  font-weight: 800;
+  line-height: 1.46;
+  margin-bottom: 0;
+}
+
+.art-item-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* 유료 단서: 종목별 한 줄 목록 */
+.paid-stock-row {
+  background: var(--bg-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  transition: all 0.14s ease;
+}
+
+.paid-stock-row:hover {
+  border-color: var(--border-strong);
+}
+
+.paid-stock-row.selected {
+  background: rgba(21, 56, 54, 0.45);
+  border-color: var(--accent-mint);
+}
+
+.paid-stock-row.is-owned {
+  border-left: 3px solid var(--accent-mint);
+}
+
+.psr-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.psr-stock-name {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.psr-industry {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: #122633;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.psr-status {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.psr-status.choice {
+  background: rgba(88, 179, 255, 0.14);
+  color: #82cbff;
+  border: 1px solid rgba(88, 179, 255, 0.3);
+}
+
+.psr-status.single {
+  background: rgba(155, 178, 192, 0.12);
+  color: #c2d5e0;
+  border: 1px solid rgba(155, 178, 192, 0.25);
+}
+
+.psr-status.owned {
+  background: rgba(79, 227, 181, 0.16);
+  color: var(--accent-mint);
+  border: 1px solid rgba(79, 227, 181, 0.4);
+}
+
+.psr-status.insufficient,
+.psr-status.closed {
+  background: rgba(255, 107, 91, 0.12);
+  color: #ff8e80;
+}
+
+.reader-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.market-grid > *,
+.articles-grid > *,
+.chat-grid > * {
+  min-width: 0;
+}
+
+/* 390px 모바일 화면 최적화 (가로 스크롤 방지 및 하단 탭 가림 방지) */
+@media (max-width: 768px) {
+  .trading-top-bar {
+    padding: 9px 12px;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .trading-top-left {
+    gap: 8px;
+  }
+
+  .top-year {
+    font-size: 15.5px;
+    white-space: nowrap;
+  }
+
+  .top-round {
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  .timer-group {
+    gap: 5px;
+  }
+
+  #trading-timer-pill {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .btn-ready-compact {
+    padding: 4px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .metric-cash .metric-label {
+    font-size: 10.5px;
+  }
+
+  .metric-cash .metric-value {
+    font-size: 14.5px;
+  }
+
+  .trading-main-container {
+    padding: 12px 12px calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .market-list-card,
+  .market-detail-card,
+  .market-portfolio-card,
+  .articles-list-card,
+  .articles-reader-card,
+  .chat-sidebar-card,
+  .chat-room-card {
+    padding: 15px 14px;
+  }
+
+  .article-list-ul {
+    max-height: none;
+  }
+
+  .reader-headline {
+    font-size: 20px;
+    margin-bottom: 12px;
+  }
+
+  .reader-body-p {
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+
+  .reader-footer-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .reader-footer-actions {
+    width: 100%;
+  }
+
+  .reader-footer-actions button {
+    flex: 1;
+    width: 100%;
+  }
+
+  .paid-stock-row {
+    padding: 10px 12px;
+  }
+
+  .psr-stock-name {
+    font-size: 13.5px;
+  }
+
+  .psr-status {
+    font-size: 11px;
+    padding: 3px 7px;
+  }
+
+  .toast-container {
+    bottom: 72px;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+}

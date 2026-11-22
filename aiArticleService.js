@@ -122,12 +122,12 @@ function composeStructuredKoreanNews(brief, fallbackArticle) {
     : fallbackArticle.postTitle;
   const baseBody = fallbackArticle.body;
 
-  // 무료 기사 제목 말미 또는 접두어를 업종·연도 맥락에 맞게 자연스럽게 변주 (숨겨진 회사명 절대 미포함)
+  // 무료 기사 제목을 깔끔하게 유지하되 업종명이 제목에 이미 포함된 경우 중복 접두어를 붙이지 않음
+  const hasIndInTitle = baseTitle.includes(brief.allowedIndustry);
   const freeTitleTemplates = [
     (t) => t,
-    (t) => `[${brief.allowedIndustry} 동향] ${t}`,
-    (t) => `${t}… 업계 수혜·위험 촉각`,
-    (t) => `${brief.year}년 ${brief.allowedIndustry} 시장, ${t}`
+    (t) => (hasIndInTitle ? t : `[${brief.allowedIndustry}] ${t}`),
+    (t) => `${t}… 시장 관심 집중`
   ];
 
   const paidClosingVariants = [

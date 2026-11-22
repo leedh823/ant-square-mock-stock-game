@@ -665,6 +665,44 @@ async function runVerification() {
   );
   assert.strictEqual(leakCheck.valid, false);
 
+  // 1차 UI 개선(거래 공통 헤더 & 기사 탭 3분할·종목별 한 줄·관련 종목 보기) 정적 및 응답 검증
+  const indexRes = await request('GET', '/');
+  const appJsRes = await request('GET', '/app.js');
+  const cssRes = await request('GET', '/styles.css');
+  assert.strictEqual(indexRes.statusCode, 200);
+  assert.strictEqual(appJsRes.statusCode, 200);
+  assert.strictEqual(cssRes.statusCode, 200);
+
+  const htmlStr = indexRes.body.toString('utf8');
+  const jsStr = appJsRes.body.toString('utf8');
+  const cssStr = cssRes.body.toString('utf8');
+
+  // (1) 거래 헤더: 현재 연도(top-year-label), 남은 시간(trading-timer-pill), 마감 준비(btn-trading-ready), 거래 가능 현금(top-available-cash)만 배치되고,
+  //     총자산(pf-total-assets)과 직전 순위(pf-my-rank)는 '내 투자'(market-portfolio-col)로 이동했는지 확인
+  assert.ok(htmlStr.includes('id="top-year-label"'));
+  assert.ok(htmlStr.includes('id="trading-timer-pill"'));
+  assert.ok(htmlStr.includes('id="btn-trading-ready"'));
+  assert.ok(htmlStr.includes('id="top-available-cash"'));
+  assert.ok(!htmlStr.includes('id="top-my-rank"'), '직전 순위는 상단 거래 헤더가 아닌 내 투자에 배치되어야 합니다.');
+  assert.ok(!htmlStr.includes('id="top-total-assets"'), '총자산은 상단 거래 헤더가 아닌 내 투자에 배치되어야 합니다.');
+  assert.ok(htmlStr.includes('id="pf-total-assets"'));
+  assert.ok(htmlStr.includes('id="pf-my-rank"'));
+
+  // (2) 기사 탭 내부 탐색 3가지 (올해 기사 / 유료 단서 / 보관함) 및 보관함 전용 필터 이동 확인
+  assert.ok(htmlStr.includes('id="btn-art-nav-current"'));
+  assert.ok(htmlStr.includes('id="btn-art-nav-paid"'));
+  assert.ok(htmlStr.includes('id="btn-art-nav-archive"'));
+  assert.ok(htmlStr.includes('id="articles-archive-controls"'));
+
+  // (3) 유료 단서 종목별 한 줄(paid-stock-row), 관련 종목 보기(data-goto-related-stock, btn-paid-related-stock), 읽던 기사로 돌아가기(btn-back-to-reading-article), 스크롤 복원(articleScrollTopByNav) 확인
+  assert.ok(jsStr.includes('paid-stock-row'));
+  assert.ok(jsStr.includes('data-goto-related-stock'));
+  assert.ok(jsStr.includes('btn-paid-related-stock'));
+  assert.ok(jsStr.includes('articleScrollTopByNav'));
+  assert.ok(cssStr.includes('.paid-stock-row'));
+
+  console.log('\n[통과] 5. 1차 UI 개선(거래 공통 헤더 간소화, 내 투자 총자산·직전 순위 배치, 기사 탭 올해 기사/유료 단서/보관함 3분할 및 종목별 한 줄, 관련 종목 보기, 읽던 기사·목록 위치 복원) 검증 완료');
+
   console.log('\n=== 모든 검증 통과 ===');
   process.exit(0);
 }

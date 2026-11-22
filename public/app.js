@@ -27,11 +27,21 @@
     orderSide: 'BUY',             // 'BUY' | 'SELL'
     orderQty: 1,
     lastFocusedYear: null,
-    selectedArticleYear: 2011,
-    showAllYearsInArticles: false, // 기사 탭에서 전 연도 모아보기 여부
-    articleFilter: 'ALL',         // 'ALL' | 'OWNED' | 'ARC' | '바이오' | '반도체' | '조선' | '엔터' | 'OTHER'
-    selectedArticleType: 'free',  // 'free' | 'paid'
-    selectedArticleId: null,
+    lastTradingResetYear: null,   // 새 연도 거래 시작 시 '올해 기사' 기본 화면 초기화 기준 연도
+    articleNav: 'current_free',   // 'current_free' (올해 기사) | 'paid_clues' (유료 단서) | 'archive' (보관함)
+    selectedFreeArticleId: null,  // 올해 기사에서 읽던 무료 기사 ID
+    selectedPaidStockId: null,    // 유료 단서에서 선택한 종목 ID
+    selectedPaidArticleId: null,  // 유료 단서에서 선택한 단서 ID
+    selectedArticleYear: 2011,    // 보관함 선택 연도
+    showAllYearsInArticles: true, // 보관함에서 전 연도 모아보기 여부
+    articleFilter: 'ALL',         // 보관함 필터: 'ALL' | 'OWNED' | 'ARC' | '바이오' | '반도체' | '조선' | '엔터' | 'OTHER'
+    selectedArchiveArticleId: null, // 보관함에서 읽던 기사 ID
+    articleScrollTopByNav: {      // 같은 연도 내 탭 이동 시 목록 스크롤 위치 복원
+      current_free: 0,
+      paid_clues: 0,
+      archive: 0
+    },
+    cameFromArticles: false,      // 기사 본문의 '관련 종목 보기'에서 시장으로 이동했는지 여부
     selectedChatTargetId: null,   // null = 전체 방, participantId = 1:1 대화
     inspectingMarketDuringOpening: false, // 개장 결과 중 시장·내 투자 확인 모드
     isSubmittingOrder: false,
@@ -302,23 +312,29 @@
       serverClockOffset = newState.serverNow - Date.now();
     }
 
-    // 새 연도 진입 또는 거래 상태 전환 시 기본 기사 연도 자동 동기화
+    // 새 연도 거래 시작 시 '올해 기사'를 기본 화면으로 초기화하고, 같은 연도 내에서는 읽던 기사와 목록 위치를 유지
     if (prevYear !== newState.room.currentYear || prevStatus !== newState.room.status) {
       if (newState.room.status === 'TRADING') {
         uiState.inspectingMarketDuringOpening = false;
-        if (newState.room.currentYear >= 2011) {
+        if (uiState.lastTradingResetYear !== newState.room.currentYear) {
+          uiState.lastTradingResetYear = newState.room.currentYear;
+          uiState.articleNav = 'current_free';
+          uiState.selectedFreeArticleId = null;
+          uiState.selectedPaidStockId = null;
+          uiState.selectedPaidArticleId = null;
           uiState.selectedArticleYear = newState.room.currentYear;
-          const yrArts = newState.articlesByYear[newState.room.currentYear];
-          if (yrArts) {
-            const list = uiState.selectedArticleType === 'paid' ? yrArts.paid : yrArts.free;
-            if (list && list.length > 0) {
-              uiState.selectedArticleId = list[0].id;
-            }
-          }
+          uiState.mobileShowReader = false;
+          uiState.cameFromArticles = false;
+          uiState.articleScrollTopByNav = {
+            current_free: 0,
+            paid_clues: 0,
+            archive: 0
+          };
         }
       }
       if (newState.room.status === 'OPENING') {
         uiState.inspectingMarketDuringOpening = false;
+        uiState.cameFromArticles = false;
       }
       if (newState.room.status === 'SETTLEMENT') {
         recordPlayedScenario(newState.room.scenarioId);
@@ -446,13 +462,25 @@
   function renderTradingScreen() {
     const { room, me } = appState;
 
-    // 상단 상태바
+    // 상단 상태바 (현재 연도, 남은 시간 + 마감 준비, 거래 가능 현금 집중 배치)
     $('top-year-label').textContent = `${room.currentYear}년`;
     $('top-round-label').textContent = `${room.roundIndex} / ${room.totalRounds}`;
-    $('top-my-rank').textContent = `${me.currentRank}위`;
-    $('top-total-assets').textContent = formatWon(me.totalAssets);
     $('top-available-cash').textContent = formatWon(me.cash);
     $('room-code-mini-chip').textContent = `방 코드: ${room.code}`;
+
+    // 총자산과 직전 순위는 '내 투자'에서 확인하도록 항상 최신 값으로 동기화
+    if ($('pf-total-assets')) {
+      $('pf-total-assets').textContent = formatWon(me.totalAssets);
+    }
+    if ($('pf-my-rank')) {
+      const rankDelta = (me.prevRank || me.currentRank) - me.currentRank;
+      let rankSuffix = '';
+      if (room.currentYear > 2010) {
+        if (rankDelta > 0) rankSuffix = ` (↑${rankDelta})`;
+        else if (rankDelta < 0) rankSuffix = ` (↓${Math.abs(rankDelta)})`;
+      }
+      $('pf-my-rank').textContent = `${me.currentRank}위${rankSuffix}`;
+    }
 
     // 거래 마감 준비 버튼 및 개장 결과 복귀 버튼
     const readyBtn = $('btn-trading-ready');
@@ -595,6 +623,11 @@
     $('detail-stock-name').textContent = stock.name;
     $('detail-public-business').textContent = stock.publicBusiness;
     $('detail-current-price').textContent = formatWon(stock.currentPrice);
+
+    const returnArticleBar = $('detail-return-article-bar');
+    if (returnArticleBar) {
+      returnArticleBar.classList.toggle('hidden', !uiState.cameFromArticles);
+    }
 
     const badgeEl = $('detail-change-badge');
     if (stock.isBaseYear) {
@@ -867,11 +900,9 @@
 
       groupDiv.querySelectorAll('[data-goto-paid-id]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          uiState.selectedArticleYear = Number(btn.dataset.gotoPaidYear) || room.currentYear;
-          uiState.showAllYearsInArticles = false;
-          uiState.selectedArticleType = 'paid';
-          uiState.articleFilter = 'ALL';
-          uiState.selectedArticleId = btn.dataset.gotoPaidId;
+          uiState.articleNav = 'paid_clues';
+          uiState.selectedPaidStockId = stock.id;
+          uiState.selectedPaidArticleId = btn.dataset.gotoPaidId;
           uiState.mobileShowReader = true;
           switchTab('articles');
         });
@@ -937,11 +968,20 @@
    */
   function renderPortfolioPanel() {
     if (!appState) return;
-    const { me } = appState;
+    const { room, me } = appState;
 
     $('pf-cash').textContent = formatWon(me.cash);
     $('pf-stock-eval').textContent = formatWon(me.stockEvaluation);
     $('pf-total-assets').textContent = formatWon(me.totalAssets);
+    if ($('pf-my-rank')) {
+      const rankDelta = (me.prevRank || me.currentRank) - me.currentRank;
+      let rankSuffix = '';
+      if (room.currentYear > 2010) {
+        if (rankDelta > 0) rankSuffix = ` (↑${rankDelta})`;
+        else if (rankDelta < 0) rankSuffix = ` (↓${Math.abs(rankDelta)})`;
+      }
+      $('pf-my-rank').textContent = `${me.currentRank}위${rankSuffix}`;
+    }
 
     const heldListEl = $('pf-holdings-list');
     heldListEl.innerHTML = '';
@@ -992,13 +1032,13 @@
       ...(me.articlePayments || []).map((ap) => ({
         timestamp: ap.timestamp,
         year: ap.year,
-        label: `[유료 기사 구매] ${ap.preTitle}`,
+        label: `[유료 단서 구매] ${ap.preTitle}`,
         amountText: `−${formatWon(ap.price)}`
       }))
     ].sort((a, b) => b.timestamp - a.timestamp);
 
     if (combinedLogs.length === 0) {
-      historyEl.innerHTML = `<div class="pf-history-item" style="color:#657f8f;">아직 주문이나 유료 기사 결제 내역이 없습니다.</div>`;
+      historyEl.innerHTML = `<div class="pf-history-item" style="color:#657f8f;">아직 주문이나 유료 단서 결제 내역이 없습니다.</div>`;
     } else {
       for (const item of combinedLogs) {
         const row = document.createElement('div');
@@ -1013,88 +1053,323 @@
   }
 
   /**
-   * 05 & 06. 기사 탭 렌더링 (무료 기사 5개 + 유료 기사 상점 및 열람)
+   * 관련 종목 보기 이동 헬퍼 (같은 연도 내 읽던 기사 및 목록 위치 보존)
+   */
+  function navigateToRelatedStock(stockId) {
+    if (!stockId) return;
+    const listUl = $('article-list-ul');
+    if (listUl) {
+      uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
+    }
+    uiState.selectedStockId = stockId;
+    uiState.showMyInvestment = false;
+    uiState.mobileShowDetail = true;
+    uiState.cameFromArticles = true;
+    switchTab('market');
+  }
+
+  /**
+   * 05 & 06. 기사 탭 렌더링
+   * - 내부 탐색 3가지: 올해 기사(current_free) / 유료 단서(paid_clues) / 보관함(archive)
+   * - 기본 화면은 '올해 기사'이며, 새 연도 거래가 시작되면 '올해 기사'로 열립니다.
+   * - 연도 선택과 업종·장기 사건·구매 내역 필터는 '보관함'으로 이동했습니다.
+   * - '유료 단서' 목록은 기사별이 아닌 종목별 한 줄로 표시하고, 종목을 열면 단일 기사 또는 일정·사업 리스크 비교가 나타납니다.
    */
   function renderArticlesTab() {
     if (!appState) return;
-    const { room, me, articlesByYear } = appState;
+    const { room, me, stocks, articlesByYear } = appState;
     const articlesGrid = document.querySelector('.articles-grid');
     if (articlesGrid) {
       articlesGrid.classList.toggle('mobile-show-reader', uiState.mobileShowReader);
     }
 
-    // 2010년 첫 거래 또는 2011년 개장 결과 단계(아직 2011년 거래가 시작되기 전)에는 공개된 기사가 없음
+    // 내부 탐색 탭 활성화 상태 동기화
+    const nav = uiState.articleNav || 'current_free';
+    $('btn-art-nav-current').classList.toggle('active', nav === 'current_free');
+    $('btn-art-nav-paid').classList.toggle('active', nav === 'paid_clues');
+    $('btn-art-nav-archive').classList.toggle('active', nav === 'archive');
+
+    // 보관함 전용 컨트롤은 보관함 탭에서만 표시
+    $('articles-archive-controls').classList.toggle('hidden', nav !== 'archive');
+
+    const listUl = $('article-list-ul');
     const availableYears = Object.keys(articlesByYear)
       .map(Number)
       .filter((y) => y >= 2011 && y <= room.currentYear)
       .sort((a, b) => b - a);
 
-    if (room.currentYear === 2010 || availableYears.length === 0) {
-      const isOpeningWait = room.currentYear >= 2011 && room.status === 'OPENING';
-      $('articles-year-heading').textContent = `${room.currentYear}년 기사`;
-      $('articles-year-tabs').innerHTML = '';
+    const isOpeningStage = room.currentYear >= 2011 && room.status === 'OPENING';
+    const is2010Stage = room.currentYear === 2010;
+
+    // -------------------------------------------------------------------------
+    // 1. [올해 기사] 탭 (기본 화면: 거래 시작 후 올해 무료 기사 5개의 제목을 바로 표시)
+    // -------------------------------------------------------------------------
+    if (nav === 'current_free') {
       $('paid-price-banner').classList.add('hidden');
-      $('article-list-ul').innerHTML = `
-        <li class="article-card-item">
-          <div class="art-item-title">${
-            isOpeningWait
-              ? `${room.currentYear}년 기사는 거래 단계가 시작될 때 동시에 공개됩니다`
-              : '2010년은 기사 없이 첫 거래를 진행합니다'
-          }</div>
-          <div class="art-item-desc">${
-            isOpeningWait
-              ? `개장 결과 화면에서 [${room.currentYear}년 거래]가 시작되면 무료 기사 5개와 유료 기사 목록이 동시에 열립니다.`
-              : '무료 기사 5개와 유료 조사 단서는 2011년 거래 시작과 함께 공개됩니다.'
-          }</div>
+      $('articles-year-heading').textContent = `${room.currentYear}년 올해 기사`;
+      $('articles-section-sublabel').textContent = is2010Stage
+        ? '첫 거래'
+        : (isOpeningStage ? '거래 시작 전' : '무료 기사 5건');
+
+      if (is2010Stage || isOpeningStage) {
+        listUl.innerHTML = `
+          <li class="article-card-item" style="cursor:default;">
+            <div class="art-item-title">${
+              isOpeningStage
+                ? `${room.currentYear}년 신규 기사는 아직 열리지 않았습니다`
+                : '2010년은 기사 없이 첫 거래를 진행합니다'
+            }</div>
+            <div class="art-item-desc">${
+              isOpeningStage
+                ? `개장 결과 단계에서는 그해 개장가와 등락률을 먼저 확인합니다. [${room.currentYear}년 거래]가 시작되면 무료 기사 5개와 유료 단서가 동시에 공개됩니다.`
+                : '무료 기사 5개와 유료 단서는 2011년 거래가 시작될 때 동시에 공개됩니다.'
+            }</div>
+          </li>
+        `;
+        $('article-reader-content').innerHTML = `
+          <div>
+            <div class="reader-top-badges">
+              <span class="reader-badge">${isOpeningStage ? `${room.currentYear}년 개장 단계` : '2010년 첫 거래'}</span>
+            </div>
+            <h3 class="reader-headline">${
+              isOpeningStage ? `${room.currentYear}년 신규 기사는 거래 시작 시 공개됩니다` : '2010년 첫 거래 구간입니다'
+            }</h3>
+            <p class="reader-body-p">${
+              isOpeningStage
+                ? `기존 공개 규칙에 따라 개장 결과 단계에서는 ${room.currentYear}년 신규 기사가 아직 열리지 않습니다. 지난 연도의 무료 기사와 구매한 유료 단서는 [보관함]에서 바로 다시 볼 수 있습니다.`
+                : '2010년에는 기사 없이 10개 종목의 기준가를 확인하고 첫 매수 여부를 결정합니다. 2011년 거래 시작부터 해마다 무료 기사 5개와 유료 단서가 공개됩니다.'
+            }</p>
+          </div>
+          <div class="reader-footer-bar">
+            <span class="reader-meta-text">${isOpeningStage ? '지난 연도 단서는 보관함에서 열람 가능' : '2010년 기준가 거래'}</span>
+            <div class="reader-footer-actions">
+              ${isOpeningStage && availableYears.length > 0 ? '<button type="button" class="btn-secondary" id="btn-opening-to-archive">보관함 보기</button>' : ''}
+              <button type="button" class="btn-primary" id="btn-wait-to-market">시장으로 이동</button>
+            </div>
+          </div>
+        `;
+        const archBtn = $('btn-opening-to-archive');
+        if (archBtn) {
+          archBtn.addEventListener('click', () => {
+            uiState.articleNav = 'archive';
+            renderArticlesTab();
+          });
+        }
+        const mktBtn = $('btn-wait-to-market');
+        if (mktBtn) {
+          mktBtn.addEventListener('click', () => switchTab('market'));
+        }
+        return;
+      }
+
+      const currentFreeList = (articlesByYear[room.currentYear] && articlesByYear[room.currentYear].free) || [];
+      if (!uiState.selectedFreeArticleId || !currentFreeList.some((a) => a.id === uiState.selectedFreeArticleId)) {
+        uiState.selectedFreeArticleId = currentFreeList[0] ? currentFreeList[0].id : null;
+      }
+
+      listUl.innerHTML = '';
+      currentFreeList.forEach((art, idx) => {
+        const li = document.createElement('li');
+        const isSelected = art.id === uiState.selectedFreeArticleId;
+        li.className = `article-card-item free-headline-card${isSelected ? ' selected' : ''}`;
+
+        // 숨겨진 회사 기사는 업종만 표시하고 특정 종목을 노출하지 않음
+        const disclosedNames = !art.hideCompanyName && Array.isArray(art.relatedStockIds) && art.relatedStockIds.length > 0
+          ? art.relatedStockIds
+              .map((sid) => (stocks.find((s) => s.id === sid) || {}).name)
+              .filter(Boolean)
+              .join('·')
+          : null;
+        const badgeText = art.hideCompanyName
+          ? `${art.industry} 업종`
+          : (disclosedNames ? `${art.industry} · ${disclosedNames}` : art.industry);
+
+        li.innerHTML = `
+          <div class="art-item-top">
+            <span class="art-item-tag">${escapeHtml(badgeText)}</span>
+            <span class="art-item-num">기사 ${idx + 1}</span>
+          </div>
+          <div class="art-item-title">${escapeHtml(art.title)}</div>
+        `;
+
+        li.addEventListener('click', () => {
+          uiState.articleScrollTopByNav.current_free = listUl.scrollTop;
+          uiState.selectedFreeArticleId = art.id;
+          uiState.mobileShowReader = true;
+          renderArticlesTab();
+        });
+        listUl.appendChild(li);
+      });
+
+      listUl.scrollTop = uiState.articleScrollTopByNav.current_free || 0;
+      const selectedFree = currentFreeList.find((a) => a.id === uiState.selectedFreeArticleId) || currentFreeList[0] || null;
+      renderFreeArticleReader(selectedFree);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. [유료 단서] 탭 (종목별 한 줄 목록 -> 선택 시 단일 기사 또는 일정·사업 리스크 비교)
+    // -------------------------------------------------------------------------
+    if (nav === 'paid_clues') {
+      $('articles-year-heading').textContent = `${room.currentYear}년 유료 단서`;
+      $('articles-section-sublabel').textContent = is2010Stage || isOpeningStage ? '거래 시작 전' : '10종목 · 종목별 선택';
+
+      if (is2010Stage || isOpeningStage) {
+        $('paid-price-banner').classList.add('hidden');
+        listUl.innerHTML = `
+          <li class="article-card-item" style="cursor:default;">
+            <div class="art-item-title">${
+              isOpeningStage
+                ? `${room.currentYear}년 유료 단서는 거래 시작 시 공개됩니다`
+                : '2010년에는 유료 단서를 판매하지 않습니다'
+            }</div>
+            <div class="art-item-desc">${
+              isOpeningStage
+                ? `개장 결과 단계에서는 그해 신규 단서가 열리지 않습니다. 지난 연도에 구매한 단서는 [보관함]에서 다시 열람할 수 있습니다.`
+                : '2011년 거래가 시작되면 10개 종목의 유료 단서가 공개됩니다.'
+            }</div>
+          </li>
+        `;
+        $('article-reader-content').innerHTML = `
+          <div>
+            <div class="reader-top-badges">
+              <span class="reader-badge">${isOpeningStage ? `${room.currentYear}년 개장 단계` : '2010년 첫 거래'}</span>
+            </div>
+            <h3 class="reader-headline">${
+              isOpeningStage ? `${room.currentYear}년 신규 유료 단서는 아직 열리지 않았습니다` : '2011년 거래부터 유료 단서가 제공됩니다'
+            }</h3>
+            <p class="reader-body-p">${
+              isOpeningStage
+                ? `[${room.currentYear}년 거래]가 시작되면 종목별 유료 단서와 공통 가격이 공개됩니다. 이미 구매한 지난 연도 단서는 [보관함]에서 확인하세요.`
+                : '2010년 첫 거래 이후 2011년부터 매년 종목별 유료 단서를 조사할 수 있습니다.'
+            }</p>
+          </div>
+          <div class="reader-footer-bar">
+            <span class="reader-meta-text">거래 시작 시 동시 공개</span>
+            <div class="reader-footer-actions">
+              ${isOpeningStage && availableYears.length > 0 ? '<button type="button" class="btn-secondary" id="btn-paid-wait-archive">보관함 보기</button>' : ''}
+              <button type="button" class="btn-primary" id="btn-paid-wait-market">시장으로 이동</button>
+            </div>
+          </div>
+        `;
+        const archBtn = $('btn-paid-wait-archive');
+        if (archBtn) {
+          archBtn.addEventListener('click', () => {
+            uiState.articleNav = 'archive';
+            renderArticlesTab();
+          });
+        }
+        const mktBtn = $('btn-paid-wait-market');
+        if (mktBtn) {
+          mktBtn.addEventListener('click', () => switchTab('market'));
+        }
+        return;
+      }
+
+      const currentPaidList = (articlesByYear[room.currentYear] && articlesByYear[room.currentYear].paid) || [];
+      const commonPrice = room.currentArticlePrice;
+      $('paid-price-banner').classList.remove('hidden');
+      $('paid-common-price-label').textContent = formatWon(commonPrice);
+
+      if (!uiState.selectedPaidStockId || !stocks.some((s) => s.id === uiState.selectedPaidStockId)) {
+        uiState.selectedPaidStockId = stocks[0] ? stocks[0].id : null;
+      }
+
+      listUl.innerHTML = '';
+      for (const stock of stocks) {
+        const stockClues = currentPaidList.filter((p) => p.stockId === stock.id);
+        const hasChoice = stockClues.length > 1 || (stockClues[0] && stockClues[0].hasChoicePair);
+        const purchasedClue = stockClues.find((p) => p.purchased) || null;
+        const priceVal = stockClues[0] ? stockClues[0].price : commonPrice;
+        const isSelected = stock.id === uiState.selectedPaidStockId;
+
+        const li = document.createElement('li');
+        li.className = `paid-stock-row${isSelected ? ' selected' : ''}${purchasedClue ? ' is-owned' : ''}`;
+
+        let statusText = hasChoice ? `일정·리스크 2종 · ${formatWon(priceVal)}` : `단일 단서 · ${formatWon(priceVal)}`;
+        let statusClass = hasChoice ? 'psr-status choice' : 'psr-status single';
+        if (purchasedClue) {
+          statusText = hasChoice
+            ? `선택 완료 · ${purchasedClue.clueTypeLabel || '구매함'}`
+            : '구매 완료';
+          statusClass = 'psr-status owned';
+        } else if (room.status !== 'TRADING') {
+          statusText = '거래 마감';
+          statusClass = 'psr-status closed';
+        } else if (me.cash < priceVal) {
+          statusText = `잔고 부족 · ${formatWon(priceVal)}`;
+          statusClass = 'psr-status insufficient';
+        }
+
+        li.innerHTML = `
+          <div class="psr-left">
+            <strong class="psr-stock-name">${escapeHtml(stock.name)}</strong>
+            <span class="psr-industry">${escapeHtml(stock.industry)}</span>
+          </div>
+          <span class="${statusClass}">${escapeHtml(statusText)}</span>
+        `;
+
+        li.addEventListener('click', () => {
+          uiState.articleScrollTopByNav.paid_clues = listUl.scrollTop;
+          uiState.selectedPaidStockId = stock.id;
+          if (purchasedClue) {
+            uiState.selectedPaidArticleId = purchasedClue.id;
+          } else if (stockClues[0]) {
+            uiState.selectedPaidArticleId = stockClues[0].id;
+          }
+          uiState.mobileShowReader = true;
+          renderArticlesTab();
+        });
+
+        listUl.appendChild(li);
+      }
+
+      listUl.scrollTop = uiState.articleScrollTopByNav.paid_clues || 0;
+      const activeStock = stocks.find((s) => s.id === uiState.selectedPaidStockId) || stocks[0];
+      const activeStockClues = currentPaidList.filter((p) => p.stockId === (activeStock && activeStock.id));
+      renderPaidStockClueReader(activeStock, activeStockClues);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. [보관함] 탭 (연도 선택 + 업종·장기 사건·구매 내역 필터 + 지난 무료 기사 및 구매 단서 열람)
+    // -------------------------------------------------------------------------
+    $('paid-price-banner').classList.add('hidden');
+    $('articles-year-heading').textContent = '기사 · 단서 보관함';
+
+    if (availableYears.length === 0) {
+      $('articles-section-sublabel').textContent = '0건';
+      $('articles-year-tabs').innerHTML = '';
+      listUl.innerHTML = `
+        <li class="article-card-item" style="color:#657f8f;cursor:default;">
+          아직 보관함에 공개된 기사가 없습니다. 2011년 거래가 시작되면 무료 기사와 구매한 유료 단서가 보관함에 기록됩니다.
         </li>
       `;
       $('article-reader-content').innerHTML = `
-        <div>
-          <span class="reader-badge">안내</span>
-          <h3 class="reader-headline" style="margin-top:14px;">${
-            isOpeningWait ? `${room.currentYear}년 개장 결과 확인 단계입니다` : '2010년 첫 거래 구간입니다'
-          }</h3>
-          <p class="reader-body-p">${
-            isOpeningWait
-              ? `개장 단계에서는 그해 개장가와 등락률, 직전 거래 결과를 먼저 확인합니다. ${room.currentYear}년 무료 기사 5개와 유료 기사 목록은 거래 단계(TRADING)가 시작될 때 동시에 공개됩니다.`
-              : '2010년에는 기사 없이 10개 종목의 시작가를 확인하고 첫 매수 여부를 결정하거나 현금을 보유할 수 있습니다. 2011년 거래 시작부터 해마다 무료 기사 5개와 유료 기사가 공개됩니다.'
-          }</p>
-        </div>
-        <div class="reader-footer-bar">
-          <span class="reader-meta-text">${isOpeningWait ? '거래 시작 시 기사 공개' : '2010년 기준가 거래'}</span>
-          <button type="button" class="btn-primary" id="btn-2010-to-market">시장으로 이동</button>
+        <div style="color:#9bb2c0;padding:16px 4px;">
+          2011년 거래 시작 이후 공개된 무료 기사와 내가 구매한 유료 단서를 이곳 보관함에서 연도별·업종별로 다시 찾아볼 수 있습니다.
         </div>
       `;
-      const btn2010 = $('btn-2010-to-market');
-      if (btn2010) {
-        btn2010.addEventListener('click', () => switchTab('market'));
-      }
       return;
     }
 
     if (!availableYears.includes(uiState.selectedArticleYear)) {
-      uiState.selectedArticleYear = availableYears[0] || room.currentYear;
+      uiState.selectedArticleYear = availableYears[0];
     }
-
-    $('articles-year-heading').textContent = uiState.showAllYearsInArticles
-      ? `2011~${room.currentYear}년 기사 모아보기`
-      : `${uiState.selectedArticleYear}년 기사`;
 
     const yearTabsEl = $('articles-year-tabs');
     yearTabsEl.innerHTML = '';
 
-    if (availableYears.length > 1) {
-      const allBtn = document.createElement('button');
-      allBtn.type = 'button';
-      allBtn.className = `year-pill-btn${uiState.showAllYearsInArticles ? ' active' : ''}`;
-      allBtn.textContent = '전 연도 모아보기';
-      allBtn.addEventListener('click', () => {
-        uiState.showAllYearsInArticles = true;
-        uiState.selectedArticleId = null;
-        renderArticlesTab();
-      });
-      yearTabsEl.appendChild(allBtn);
-    }
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = `year-pill-btn${uiState.showAllYearsInArticles ? ' active' : ''}`;
+    allBtn.textContent = '전 연도';
+    allBtn.addEventListener('click', () => {
+      uiState.showAllYearsInArticles = true;
+      uiState.selectedArchiveArticleId = null;
+      renderArticlesTab();
+    });
+    yearTabsEl.appendChild(allBtn);
 
     for (const y of availableYears) {
       const btn = document.createElement('button');
@@ -1104,121 +1379,79 @@
       btn.addEventListener('click', () => {
         uiState.showAllYearsInArticles = false;
         uiState.selectedArticleYear = y;
-        uiState.selectedArticleId = null;
+        uiState.selectedArchiveArticleId = null;
         renderArticlesTab();
       });
       yearTabsEl.appendChild(btn);
     }
 
-    // 업종·단서 필터 칩 동기화
     document.querySelectorAll('#articles-filter-bar .art-filter-chip').forEach((chip) => {
       chip.classList.toggle('active', chip.dataset.filter === uiState.articleFilter);
     });
 
-    // 무료 기사 5 / 유료 기사 서브탭 ('내 구매 단서' 필터가 활성화된 경우 유료 기사로 자동 매칭)
-    if (uiState.articleFilter === 'OWNED') {
-      uiState.selectedArticleType = 'paid';
-    }
-    const isPaidTab = uiState.selectedArticleType === 'paid';
-    $('btn-art-tab-free').classList.toggle('active', !isPaidTab);
-    $('btn-art-tab-paid').classList.toggle('active', isPaidTab);
-
     const targetYears = uiState.showAllYearsInArticles ? availableYears : [uiState.selectedArticleYear];
-    let rawList = [];
+    let archiveItems = [];
     for (const y of targetYears) {
       const yd = articlesByYear[y] || { free: [], paid: [] };
-      const listForY = isPaidTab ? (yd.paid || []) : (yd.free || []);
-      rawList = rawList.concat(listForY);
+      const ownedPaidForY = (yd.paid || []).filter((p) => p.purchased);
+      const freeForY = yd.free || [];
+      archiveItems = archiveItems.concat(ownedPaidForY, freeForY);
     }
 
-    // 필터 적용 (숨겨진 회사는 공개된 업종(industry) 단위로만 필터링하여 조기에 드러나지 않도록 보호 - 기획서 5쪽)
-    const currentList = rawList.filter((art) => {
+    const filteredArchive = archiveItems.filter((art) => {
       const f = uiState.articleFilter;
       if (f === 'ALL') return true;
-      if (f === 'OWNED') return Boolean(art.purchased);
+      if (f === 'OWNED') return art.type === 'paid' && Boolean(art.purchased);
       if (f === 'ARC') return Boolean(art.arcStageLabel);
       if (f === 'OTHER') return ['식품', '게임', '항공'].includes(art.industry);
       return art.industry === f;
     });
 
-    if (isPaidTab) {
-      $('paid-price-banner').classList.remove('hidden');
-      const displayPrice = room.currentArticlePrice;
-      $('paid-common-price-label').textContent = formatWon(displayPrice);
-    } else {
-      $('paid-price-banner').classList.add('hidden');
+    $('articles-section-sublabel').textContent = `${filteredArchive.length}건`;
+
+    if (!uiState.selectedArchiveArticleId || !filteredArchive.some((a) => a.id === uiState.selectedArchiveArticleId)) {
+      uiState.selectedArchiveArticleId = filteredArchive[0] ? filteredArchive[0].id : null;
     }
 
-    if (!uiState.selectedArticleId || !currentList.some((a) => a.id === uiState.selectedArticleId)) {
-      uiState.selectedArticleId = currentList[0] ? currentList[0].id : null;
-    }
-
-    const listUl = $('article-list-ul');
     listUl.innerHTML = '';
-
-    if (currentList.length === 0) {
+    if (filteredArchive.length === 0) {
       listUl.innerHTML = `
         <li class="article-card-item" style="color:#657f8f;cursor:default;">
-          선택한 필터 조건에 해당하는 기사가 없습니다.
+          선택한 연도·필터 조건에 해당하는 보관 기사가 없습니다.
         </li>
       `;
-      renderArticleReader(null);
+      $('article-reader-content').innerHTML = `<div style="color:#657f8f;padding:16px 4px;">왼쪽 보관함에서 기사를 선택하세요.</div>`;
       return;
     }
 
-    for (const art of currentList) {
+    for (const art of filteredArchive) {
       const li = document.createElement('li');
-      const isSelected = art.id === uiState.selectedArticleId;
+      const isSelected = art.id === uiState.selectedArchiveArticleId;
       li.className = `article-card-item${isSelected ? ' selected' : ''}`;
 
       if (art.type === 'free') {
-        const arcBadge = art.arcStageLabel ? ` · ${escapeHtml(art.arcStageLabel)}` : '';
+        const tagLabel = art.hideCompanyName ? `${art.industry} 업종` : art.industry;
         li.innerHTML = `
           <div class="art-item-top">
-            <span class="art-item-tag">${escapeHtml(art.industry)}${arcBadge}</span>
-            <span class="art-item-status">${art.hideCompanyName ? '대상 회사 추리' : '무료 공개'}</span>
+            <span class="art-item-tag">${art.year}년 · ${escapeHtml(tagLabel)}</span>
+            <span class="art-item-status">무료 기사</span>
           </div>
           <div class="art-item-title">${escapeHtml(art.title)}</div>
-          <div class="art-item-desc">${escapeHtml(art.summary)}</div>
         `;
       } else {
-        // 유료 기사 상태 표시 (판매 가능 / 내가 구매함 / 올해 단서 선택 완료 / 잔고 부족 또는 마감 / 지난해 기사)
-        let statusLabel = art.hasChoicePair ? `2종 중 1택 · ${formatWon(art.price)}` : formatWon(art.price);
-        let statusClass = 'art-item-status';
-        if (art.purchased) {
-          statusLabel = `구매 완료 · ${formatWon(art.price)}`;
-          statusClass = 'art-item-status owned';
-        } else if (art.lockedBySibling) {
-          statusLabel = '올해 단서 선택 완료';
-          statusClass = 'art-item-status locked-sibling';
-        } else if (art.year !== room.currentYear) {
-          statusLabel = '구매 종료 (지난해 기사)';
-        } else if (room.status !== 'TRADING') {
-          statusLabel = '거래 마감';
-        } else if (me.cash < art.price) {
-          statusLabel = `잔고 부족 · ${formatWon(art.price)}`;
-        }
-        const arcBadge = art.arcStageLabel ? ` · ${escapeHtml(art.arcStageLabel)}` : '';
-        const clueTypeClass = art.clueType === 'schedule'
-          ? 'schedule'
-          : (art.clueType === 'risk' ? 'risk' : 'single');
-        const clueTypeLabel = art.clueTypeLabel || (art.hasChoicePair ? '선택 단서' : '단일 단서');
-
+        const clueTypeLabel = art.clueTypeLabel || '유료 단서';
         li.innerHTML = `
           <div class="art-item-top">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <span class="art-item-tag">${escapeHtml(art.stockName)}${arcBadge}</span>
-              <span class="clue-type-pill ${clueTypeClass}">${escapeHtml(clueTypeLabel)}</span>
-            </div>
-            <span class="${statusClass}">${statusLabel}</span>
+            <span class="art-item-tag">${art.year}년 · ${escapeHtml(art.stockName)}</span>
+            <span class="art-item-status owned">내 구매 단서 · ${escapeHtml(clueTypeLabel)}</span>
           </div>
-          <div class="art-item-title">${escapeHtml(art.preTitle)} · ${escapeHtml(art.topic)}</div>
-          <div class="art-item-desc"><strong>알려주는 정보:</strong> ${escapeHtml(art.whatItTells || art.subtitle)}</div>
+          <div class="art-item-title">${escapeHtml(art.postTitle || art.preTitle)}</div>
         `;
       }
 
       li.addEventListener('click', () => {
-        uiState.selectedArticleId = art.id;
+        uiState.articleScrollTopByNav.archive = listUl.scrollTop;
+        uiState.selectedArchiveArticleId = art.id;
         uiState.mobileShowReader = true;
         renderArticlesTab();
       });
@@ -1226,263 +1459,256 @@
       listUl.appendChild(li);
     }
 
-    renderArticleReader(currentList.find((a) => a.id === uiState.selectedArticleId) || null);
+    listUl.scrollTop = uiState.articleScrollTopByNav.archive || 0;
+    const selectedArch = filteredArchive.find((a) => a.id === uiState.selectedArchiveArticleId) || filteredArchive[0];
+    if (selectedArch.type === 'free') {
+      renderFreeArticleReader(selectedArch);
+    } else {
+      const stockObj = stocks.find((s) => s.id === selectedArch.stockId) || { id: selectedArch.stockId, name: selectedArch.stockName, industry: selectedArch.industry };
+      renderPaidStockClueReader(stockObj, [selectedArch], true);
+    }
   }
 
   /**
-   * 선택형 유료 단서(일정 단서 vs 사업 리스크 단서) 2종 비교 카드 HTML 생성
+   * 무료 기사 본문 리더 렌더링
+   * - 공개된 종목이 있는 기사에는 '관련 종목 보기' 버튼 제공
+   * - 회사가 숨겨진 기사(hideCompanyName: true)에는 업종만 표시하고 특정 종목과 절대 연결하지 않음
    */
-  function buildChoiceCompareHtml(article) {
-    if (!article || !article.hasChoicePair || !appState) return '';
-    const yearData = appState.articlesByYear[article.year] || { paid: [] };
-    const pairList = (yearData.paid || []).filter(
-      (p) => p.stockId === article.stockId && p.hasChoicePair
-    );
-    if (pairList.length < 2) return '';
+  function renderFreeArticleReader(article) {
+    const container = $('article-reader-content');
+    if (!article || !appState) {
+      container.innerHTML = `<div style="color:#657f8f;padding:20px;">왼쪽 목록에서 읽을 기사를 선택하세요.</div>`;
+      return;
+    }
 
-    const cardsHtml = pairList
-      .map((item) => {
-        const isCurrent = item.id === article.id;
-        const typeClass = item.clueType === 'schedule' ? 'schedule' : 'risk';
-        let stateBadgeHtml = `<span class="choice-card-status available">선택 가능 · ${formatWon(item.price)}</span>`;
-        if (item.purchased) {
-          stateBadgeHtml = `<span class="choice-card-status owned">구매 완료 (본문 열림)</span>`;
-        } else if (item.lockedBySibling) {
-          stateBadgeHtml = `<span class="choice-card-status locked">올해 단서 선택 완료</span>`;
-        }
+    const { stocks } = appState;
+    const isHiddenCompany = Boolean(article.hideCompanyName);
+    const disclosedStocks = !isHiddenCompany && Array.isArray(article.relatedStockIds)
+      ? article.relatedStockIds
+          .map((sid) => stocks.find((s) => s.id === sid))
+          .filter(Boolean)
+      : [];
 
-        return `
-          <div
-            class="reader-choice-card${isCurrent ? ' active' : ''}${item.purchased ? ' is-owned' : ''}${item.lockedBySibling ? ' is-locked' : ''}"
-            data-select-choice-id="${escapeHtml(item.id)}"
-          >
-            <div class="choice-card-header">
-              <span class="clue-type-pill ${typeClass}">${escapeHtml(item.clueTypeLabel || '선택 단서')}</span>
-              ${stateBadgeHtml}
-            </div>
-            <div class="choice-card-topic">${escapeHtml(item.preTitle)} · ${escapeHtml(item.topic)}</div>
-            <div class="choice-card-what">
-              <strong>알려주는 정보:</strong> ${escapeHtml(item.whatItTells || item.subtitle)}
-            </div>
-            <div class="choice-card-foot">
-              <span>공통 가격 ${formatWon(item.price)}</span>
-              <span class="choice-card-select-hint">${
-                item.purchased
-                  ? '본문 열람 가능'
-                  : (item.lockedBySibling
-                    ? '올해 단서 선택 완료'
-                    : (isCurrent ? '현재 선택된 유형' : '이 유형 살펴보기 →'))
-              }</span>
-            </div>
-          </div>
-        `;
-      })
-      .join('');
+    const badgeText = isHiddenCompany
+      ? `${article.industry} 업종`
+      : (disclosedStocks.length > 0
+          ? `${article.industry} · ${disclosedStocks.map((s) => s.name).join(' · ')}`
+          : article.industry);
 
-    return `
-      <div class="reader-choice-compare-box">
-        <div class="rcc-top">
-          <div>
-            <span class="rcc-title">${escapeHtml(article.stockName)} · ${article.year}년 유료 단서 유형 선택 (2종 비교)</span>
-            <p class="rcc-sub">두 유형이 알려주는 정보와 공통 가격(${formatWon(article.price)})을 비교한 뒤 필요한 단서를 선택하세요.</p>
-          </div>
-          <span class="rcc-rule-pill">이 종목의 올해 유료 단서는 하나만 구매할 수 있어요</span>
+    const relatedButtonsHtml = disclosedStocks.length > 0
+      ? disclosedStocks
+          .map(
+            (st, idx) => `
+              <button
+                type="button"
+                class="${idx === 0 ? 'btn-primary' : 'btn-secondary'}"
+                data-goto-related-stock="${escapeHtml(st.id)}"
+              >
+                관련 종목 보기 (${escapeHtml(st.name)})
+              </button>
+            `
+          )
+          .join('')
+      : '';
+
+    container.innerHTML = `
+      <div>
+        <div class="reader-top-badges">
+          <span class="reader-badge">${escapeHtml(badgeText)}</span>
+          <span class="reader-meta-text">${article.year}년 무료 기사${article.arcStageLabel ? ` · ${escapeHtml(article.arcStageLabel)}` : ''}</span>
         </div>
-        <div class="reader-choice-grid">
-          ${cardsHtml}
+        <h3 class="reader-headline">${escapeHtml(article.title)}</h3>
+        <p class="reader-body-p">${escapeHtml(article.body)}</p>
+        ${
+          isHiddenCompany
+            ? `<div class="reader-highlight-box">대상 회사명이 비공개인 ${escapeHtml(article.industry)} 업종 기사입니다. 특정 종목과 바로 연결되지 않으며, [유료 단서] 탭에서 종목별 단서를 조사해 실제 당사자를 추리할 수 있습니다.</div>`
+            : ''
+        }
+        ${!isHiddenCompany ? '<div id="reader-quick-deduction-slot"></div>' : ''}
+      </div>
+      <div class="reader-footer-bar">
+        <span class="reader-meta-text">${
+          isHiddenCompany
+            ? `${escapeHtml(article.industry)} 업종 공통 단서 (대상 회사 비공개)`
+            : `${article.year}년 공개 기사`
+        }</span>
+        <div class="reader-footer-actions">
+          ${relatedButtonsHtml}
         </div>
       </div>
     `;
-  }
 
-  function bindChoiceCompareClicks(container) {
-    if (!container) return;
-    container.querySelectorAll('[data-select-choice-id]').forEach((card) => {
-      card.addEventListener('click', () => {
-        const targetId = card.dataset.selectChoiceId;
-        if (targetId && targetId !== uiState.selectedArticleId) {
-          uiState.selectedArticleId = targetId;
-          renderArticlesTab();
-        }
+    if (!isHiddenCompany) {
+      mountReaderQuickDeduction(article);
+    }
+
+    container.querySelectorAll('[data-goto-related-stock]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        navigateToRelatedStock(btn.dataset.gotoRelatedStock);
       });
     });
   }
 
   /**
-   * 기사 본문 읽기 및 유료 기사 구매 확인 패널 (기획서 5쪽, 10쪽, 16쪽 + 유료 단서 유형 선택)
+   * 종목별 유료 단서 리더 렌더링 (단일 기사 또는 일정·사업 리스크 2종 비교 + 결제/열람)
    */
-  function renderArticleReader(article) {
+  function renderPaidStockClueReader(stock, stockClues, isFromArchive = false) {
     const container = $('article-reader-content');
-    if (!article || !appState) {
-      container.innerHTML = `<div style="color:#657f8f;padding:24px;">왼쪽 목록에서 기사를 선택하세요.</div>`;
+    if (!stock || !Array.isArray(stockClues) || stockClues.length === 0 || !appState) {
+      container.innerHTML = `<div style="color:#657f8f;padding:20px;">왼쪽 목록에서 조사할 종목을 선택하세요.</div>`;
       return;
     }
 
     const { room, me } = appState;
+    const hasChoice = !isFromArchive && (stockClues.length > 1 || Boolean(stockClues[0].hasChoicePair));
+    const purchasedClue = stockClues.find((c) => c.purchased) || null;
 
-    // 1. 무료 기사 읽기 화면 (숨겨진 회사 기사는 특정 종목으로 자동 포커스하지 않아 조기 노출 방지 - 기획서 5쪽)
-    if (article.type === 'free') {
-      const targetStockId = (!article.hideCompanyName && article.relatedStockIds && article.relatedStockIds[0]) || null;
-      const stageChip = article.arcStageLabel
-        ? `<span class="status-pill">${escapeHtml(article.arcStageLabel)}</span>`
-        : `<span class="reader-meta-text">${article.year}년 공개</span>`;
-      container.innerHTML = `
-        <div>
-          <div class="reader-top-badges">
-            <span class="reader-badge">무료 기사 · ${escapeHtml(article.industry)}</span>
-            ${stageChip}
+    let activeClue = stockClues.find((c) => c.id === uiState.selectedPaidArticleId) || purchasedClue || stockClues[0];
+    uiState.selectedPaidArticleId = activeClue.id;
+
+    // 2종 선택형 단서(일정 단서 vs 사업 리스크 단서) 비교 카드 생성
+    let compareBoxHtml = '';
+    if (hasChoice && stockClues.length >= 2) {
+      const cardsHtml = stockClues
+        .map((item) => {
+          const isCurrent = item.id === activeClue.id;
+          const typeClass = item.clueType === 'schedule' ? 'schedule' : 'risk';
+          let stateBadgeHtml = `<span class="choice-card-status available">선택 가능 · ${formatWon(item.price)}</span>`;
+          if (item.purchased) {
+            stateBadgeHtml = `<span class="choice-card-status owned">구매 완료 (본문 열림)</span>`;
+          } else if (item.lockedBySibling) {
+            stateBadgeHtml = `<span class="choice-card-status locked">올해 단서 선택 완료</span>`;
+          }
+
+          return `
+            <div
+              class="reader-choice-card${isCurrent ? ' active' : ''}${item.purchased ? ' is-owned' : ''}${item.lockedBySibling ? ' is-locked' : ''}"
+              data-select-choice-id="${escapeHtml(item.id)}"
+            >
+              <div class="choice-card-header">
+                <span class="clue-type-pill ${typeClass}">${escapeHtml(item.clueTypeLabel || '선택 단서')}</span>
+                ${stateBadgeHtml}
+              </div>
+              <div class="choice-card-what">
+                ${escapeHtml(item.whatItTells || item.subtitle)}
+              </div>
+              <div class="choice-card-foot">
+                <span>공통 가격 ${formatWon(item.price)}</span>
+                <span class="choice-card-select-hint">${
+                  item.purchased
+                    ? '구매한 본문 열람 중'
+                    : (item.lockedBySibling
+                      ? '올해 단서 선택 완료'
+                      : (isCurrent ? '현재 선택됨' : '이 유형 선택 →'))
+                }</span>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      compareBoxHtml = `
+        <div class="reader-choice-compare-box">
+          <div class="rcc-top">
+            <div>
+              <span class="rcc-title">${escapeHtml(stock.name)} (${escapeHtml(stock.industry)}) · ${activeClue.year}년 유료 단서 비교</span>
+              <p class="rcc-sub">일정 단서와 사업 리스크 단서가 알려주는 정보를 비교하고 하나를 선택하세요.</p>
+            </div>
+            <span class="status-pill">공통 가격 ${formatWon(activeClue.price)}</span>
           </div>
-          <h3 class="reader-headline">${escapeHtml(article.title)}</h3>
-          <p class="reader-body-p">${escapeHtml(article.body)}</p>
-          ${article.hideCompanyName ? `<div class="reader-highlight-box">이 기사는 대상 회사명이 공개되지 않은 사건입니다. 과거 기사와 업종별 유료 단서를 조합해 실제 수혜/위험 종목을 추리해 보세요.</div>` : ''}
-          <div id="reader-quick-deduction-slot"></div>
-        </div>
-        <div class="reader-footer-bar">
-          <span class="reader-meta-text">${article.year}년 발행</span>
-          <button type="button" id="btn-reader-go-market" class="btn-primary">시장으로 이동</button>
+          <div class="reader-choice-grid">
+            ${cardsHtml}
+          </div>
         </div>
       `;
-      mountReaderQuickDeduction(article);
-      $('btn-reader-go-market').addEventListener('click', () => {
-        if (targetStockId) uiState.selectedStockId = targetStockId;
-        uiState.showMyInvestment = false;
-        switchTab('market');
-      });
-      return;
     }
 
-    const choiceCompareHtml = buildChoiceCompareHtml(article);
-    const clueTypeClass = article.clueType === 'schedule'
+    const clueTypeClass = activeClue.clueType === 'schedule'
       ? 'schedule'
-      : (article.clueType === 'risk' ? 'risk' : 'single');
+      : (activeClue.clueType === 'risk' ? 'risk' : 'single');
+    const clueTypeLabel = activeClue.clueTypeLabel || (hasChoice ? '선택 단서' : '단일 단서');
 
-    // 2. 유료 기사 - 이미 구매한 경우 (본문 즉시 열람, 추가 현금 차감 없음)
-    if (article.purchased) {
-      container.innerHTML = `
-        <div>
-          ${choiceCompareHtml}
-          <div class="reader-top-badges">
-            <span class="reader-badge">${escapeHtml(article.preTitle)}</span>
-            <span class="clue-type-pill ${clueTypeClass}">${escapeHtml(article.clueTypeLabel || '단일 단서')}</span>
-            <span class="reader-owned-pill">구매 완료</span>
-          </div>
-          <h3 class="reader-headline">${escapeHtml(article.postTitle)}</h3>
-          <p class="reader-body-p">${escapeHtml(article.body)}</p>
-          ${article.highlightNote ? `<div class="reader-highlight-box">${escapeHtml(article.highlightNote)}</div>` : ''}
-          <div id="reader-quick-deduction-slot"></div>
+    let detailBodyHtml = '';
+
+    // Case 1: 이미 구매한 단서 -> 본문 즉시 표시
+    if (activeClue.purchased) {
+      detailBodyHtml = `
+        <div class="reader-top-badges">
+          <span class="reader-badge">${escapeHtml(stock.name)} · ${escapeHtml(clueTypeLabel)}</span>
+          <span class="reader-owned-pill">구매 완료 · ${formatWon(activeClue.price)}</span>
         </div>
-        <div class="reader-footer-bar">
-          <span class="reader-meta-text">기사 구매 비용 ${formatWon(article.price)} (다시 읽기 시 현금 차감 없음)</span>
-          <button type="button" id="btn-paid-go-market" class="btn-primary">시장으로 이동 (${escapeHtml(article.stockName)})</button>
-        </div>
+        <h3 class="reader-headline">${escapeHtml(activeClue.postTitle)}</h3>
+        <p class="reader-body-p">${escapeHtml(activeClue.body)}</p>
+        ${activeClue.highlightNote ? `<div class="reader-highlight-box">${escapeHtml(activeClue.highlightNote)}</div>` : ''}
+        <div id="reader-quick-deduction-slot"></div>
       `;
-      bindChoiceCompareClicks(container);
-      mountReaderQuickDeduction(article);
-      $('btn-paid-go-market').addEventListener('click', () => {
-        uiState.selectedStockId = article.stockId;
-        uiState.showMyInvestment = false;
-        uiState.mobileShowDetail = true;
-        switchTab('market');
-      });
-      return;
-    }
-
-    // 2-B. 같은 종목·같은 해에 다른 유형 단서를 이미 구매해 잠긴 경우 ('올해 단서 선택 완료')
-    if (article.lockedBySibling) {
-      container.innerHTML = `
-        <div>
-          ${choiceCompareHtml}
-          <div class="reader-top-badges">
-            <span class="reader-badge">${escapeHtml(article.preTitle)}</span>
-            <span class="clue-type-pill ${clueTypeClass}">${escapeHtml(article.clueTypeLabel || '선택 단서')}</span>
+    } else if (activeClue.lockedBySibling) {
+      // Case 2: 같은 해 같은 종목에서 다른 유형을 이미 선택해 잠긴 단서 ('올해 단서 선택 완료')
+      detailBodyHtml = `
+        <div class="reader-purchase-box locked-sibling-box">
+          <div class="reader-top-badges" style="margin-bottom:8px;">
+            <span class="clue-type-pill ${clueTypeClass}">${escapeHtml(clueTypeLabel)}</span>
             <span class="status-pill locked-pill">올해 단서 선택 완료</span>
           </div>
-          <h3 class="reader-headline">${escapeHtml(article.preTitle)} (${escapeHtml(article.topic)})</h3>
-          <p class="reader-body-p">
-            <strong>알려주는 정보:</strong> ${escapeHtml(article.whatItTells || article.subtitle)}
+          <div class="reader-one-choice-notice">이 종목의 올해 유료 단서는 하나만 구매할 수 있어요</div>
+          <p class="reader-body-p" style="font-size:13.5px;margin:8px 0 14px;">
+            올해 <strong>${escapeHtml(stock.name)}</strong> 종목에서는 이미
+            <strong>「${escapeHtml(activeClue.siblingPurchasedTitle || '다른 유형 단서')}」</strong>를 선택해 구매했습니다.
           </p>
-
-          <div class="reader-purchase-box locked-sibling-box">
-            <div class="reader-purchase-title">올해 단서 선택 완료</div>
-            <div class="reader-one-choice-notice">이 종목의 올해 유료 단서는 하나만 구매할 수 있어요</div>
-            <p class="reader-body-p" style="font-size:13px;margin:10px 0 14px;">
-              ${article.year}년 <strong>${escapeHtml(article.stockName)}</strong> 종목에서 이미
-              <strong>「${escapeHtml(article.siblingPurchasedTitle || '다른 유형 단서')}」</strong>를 선택해 구매하셨습니다.
-              선택하지 않은 다른 유형의 단서 본문은 공개되지 않으며 추가 결제도 발생하지 않습니다.
-            </p>
-            ${
-              article.siblingPurchasedArticleId
-                ? `<button type="button" id="btn-open-purchased-sibling" class="btn-primary btn-full">내가 구매한 「${escapeHtml(article.siblingPurchasedTitle || '단서')}」 본문 열기</button>`
-                : ''
-            }
-          </div>
-        </div>
-
-        <div class="reader-footer-bar">
-          <span class="reader-meta-text">다음 해 거래가 시작되면 해당 연도의 새로운 단서를 다시 선택해 구매할 수 있습니다.</span>
-          <button type="button" id="btn-locked-go-market" class="btn-secondary">시장으로 이동</button>
+          ${
+            activeClue.siblingPurchasedArticleId
+              ? `<button type="button" id="btn-open-purchased-sibling" class="btn-primary btn-full">내가 구매한 「${escapeHtml(activeClue.siblingPurchasedTitle || '단서')}」 본문 보기</button>`
+              : ''
+          }
         </div>
       `;
-      bindChoiceCompareClicks(container);
-      const openSiblingBtn = $('btn-open-purchased-sibling');
-      if (openSiblingBtn && article.siblingPurchasedArticleId) {
-        openSiblingBtn.addEventListener('click', () => {
-          uiState.selectedArticleId = article.siblingPurchasedArticleId;
-          renderArticlesTab();
-        });
+    } else {
+      // Case 3: 미구매 상태 -> 알려주는 정보 + 구매 확인 및 결제 버튼
+      const isPastYear = activeClue.year !== room.currentYear;
+      const isClosed = room.status !== 'TRADING';
+      const isInsufficient = me.cash < activeClue.price;
+      const cashAfterPurchase = me.cash - activeClue.price;
+
+      let unavailableReason = null;
+      if (!isConnected) {
+        unavailableReason = '연결 복구 중에는 유료 단서를 구매할 수 없습니다.';
+      } else if (isPastYear) {
+        unavailableReason = '해당 연도에 구매하지 않은 지난 유료 단서는 구매가 종료되었습니다.';
+      } else if (isClosed) {
+        unavailableReason = '거래 시간이 마감되어 유료 단서를 구매할 수 없습니다.';
+      } else if (isInsufficient) {
+        unavailableReason = `잔고 부족: 보유 현금(${formatWon(me.cash)})이 단서 가격(${formatWon(activeClue.price)})보다 부족합니다.`;
       }
-      $('btn-locked-go-market').addEventListener('click', () => {
-        uiState.selectedStockId = article.stockId;
-        switchTab('market');
-      });
-      return;
-    }
 
-    // 3. 유료 기사 - 미구매 상태 (구매 전 확인 창에서 기사값과 구매 후 남는 현금 표시 - 기획서 10쪽)
-    const isPastYear = article.year !== room.currentYear;
-    const isClosed = room.status !== 'TRADING';
-    const isInsufficient = me.cash < article.price;
-    const cashAfterPurchase = me.cash - article.price;
-
-    let unavailableReason = null;
-    if (!isConnected) {
-      unavailableReason = '연결 복구 중에는 유료 기사를 구매할 수 없습니다.';
-    } else if (isPastYear) {
-      unavailableReason = '해당 연도에 구매하지 않은 지난 유료 기사는 구매가 종료되었습니다.';
-    } else if (isClosed) {
-      unavailableReason = '거래 시간이 마감되어 유료 기사를 구매할 수 없습니다.';
-    } else if (isInsufficient) {
-      unavailableReason = `잔고 부족: 보유 현금(${formatWon(me.cash)})이 기사 가격(${formatWon(article.price)})보다 부족합니다.`;
-    }
-
-    container.innerHTML = `
-      <div>
-        ${choiceCompareHtml}
-        <div class="reader-top-badges">
-          <span class="reader-badge">${escapeHtml(article.preTitle)}</span>
-          <span class="clue-type-pill ${clueTypeClass}">${escapeHtml(article.clueTypeLabel || '단일 단서')}</span>
-          <span class="status-pill">${article.year}년 유료 조사 단서</span>
-        </div>
-        <h3 class="reader-headline">${escapeHtml(article.preTitle)} · ${escapeHtml(article.topic)}</h3>
-        <p class="reader-body-p">
-          <strong>이 단서가 알려주는 정보:</strong> ${escapeHtml(article.whatItTells || article.subtitle)}<br />
-          구매 전에는 실제 단서 본문이 숨겨지며, 구매 즉시 본문이 열립니다.
-        </p>
-
+      detailBodyHtml = `
+        ${
+          !hasChoice
+            ? `
+              <div class="reader-top-badges">
+                <span class="reader-badge">${escapeHtml(stock.name)} (${escapeHtml(stock.industry)})</span>
+                <span class="clue-type-pill single">단일 단서 · ${formatWon(activeClue.price)}</span>
+              </div>
+              <h3 class="reader-headline">${escapeHtml(activeClue.preTitle)}</h3>
+              <p class="reader-body-p">
+                <strong>알려주는 정보:</strong> ${escapeHtml(activeClue.whatItTells || activeClue.subtitle)}
+              </p>
+            `
+            : ''
+        }
         <div class="reader-purchase-box">
-          <div class="reader-purchase-title">유료 단서 구매 확인 (${escapeHtml(article.clueTypeLabel || '단일 단서')})</div>
-          <div class="reader-one-choice-notice">이 종목의 올해 유료 단서는 하나만 구매할 수 있어요</div>
+          <div class="reader-purchase-title">${escapeHtml(stock.name)} · ${escapeHtml(clueTypeLabel)} 구매 확인</div>
+          ${hasChoice ? '<div class="reader-one-choice-notice">이 종목의 올해 유료 단서는 하나만 구매할 수 있어요</div>' : ''}
           <div class="order-calc-box" style="margin-bottom:14px;">
             <div class="calc-row">
-              <span>선택한 단서 유형</span>
-              <strong>${escapeHtml(article.preTitle)}</strong>
+              <span>선택한 단서</span>
+              <strong>${escapeHtml(activeClue.preTitle)}</strong>
             </div>
             <div class="calc-row">
-              <span>기사 가격 (${article.year}년 공통)</span>
-              <strong>${formatWon(article.price)}</strong>
+              <span>공통 가격 (${activeClue.year}년)</span>
+              <strong>${formatWon(activeClue.price)}</strong>
             </div>
             <div class="calc-row">
-              <span>현재 보유 현금</span>
+              <span>거래 가능 현금</span>
               <strong>${formatWon(me.cash)}</strong>
             </div>
             <div class="calc-row">
@@ -1501,45 +1727,83 @@
             class="btn-primary btn-full"
             ${unavailableReason || uiState.isBuyingArticle ? 'disabled' : ''}
           >
-            ${uiState.isBuyingArticle ? '결제 중...' : `${formatWon(article.price)}에 [${escapeHtml(article.clueTypeLabel || '유료 단서')}] 구매하고 본문 열기`}
+            ${uiState.isBuyingArticle ? '결제 중...' : `${formatWon(activeClue.price)}에 [${escapeHtml(clueTypeLabel)}] 구매하고 본문 열기`}
+          </button>
+        </div>
+      `;
+    }
+
+    container.innerHTML = `
+      <div>
+        ${compareBoxHtml}
+        ${detailBodyHtml}
+      </div>
+      <div class="reader-footer-bar">
+        <span class="reader-meta-text">${
+          activeClue.purchased
+            ? '구매한 단서는 보관함과 종목 타임라인에서 언제든 다시 볼 수 있습니다.'
+            : '구매 전에는 실제 단서 본문이 숨겨지며 결제 즉시 열립니다.'
+        }</span>
+        <div class="reader-footer-actions">
+          <button type="button" id="btn-paid-related-stock" class="btn-secondary">
+            관련 종목 보기 (${escapeHtml(stock.name)})
           </button>
         </div>
       </div>
-
-      <div class="reader-footer-bar">
-        <span class="reader-meta-text">결제 즉시 현금에서 1회 차감되며 기사 보관함과 종목 타임라인에서 다시 볼 수 있습니다.</span>
-        <button type="button" id="btn-unbought-go-market" class="btn-secondary">시장으로 이동</button>
-      </div>
     `;
 
-    bindChoiceCompareClicks(container);
-    const buyBtn = $('btn-confirm-buy-article');
-    if (buyBtn && !unavailableReason) {
-      buyBtn.addEventListener('click', () => handleBuyArticle(article));
-    }
-    $('btn-unbought-go-market').addEventListener('click', () => {
-      uiState.selectedStockId = article.stockId;
-      switchTab('market');
+    container.querySelectorAll('[data-select-choice-id]').forEach((card) => {
+      card.addEventListener('click', () => {
+        const targetId = card.dataset.selectChoiceId;
+        if (targetId && targetId !== uiState.selectedPaidArticleId) {
+          uiState.selectedPaidArticleId = targetId;
+          renderArticlesTab();
+        }
+      });
     });
+
+    if (activeClue.purchased) {
+      mountReaderQuickDeduction(activeClue);
+    }
+
+    const openSiblingBtn = $('btn-open-purchased-sibling');
+    if (openSiblingBtn && activeClue.siblingPurchasedArticleId) {
+      openSiblingBtn.addEventListener('click', () => {
+        uiState.selectedPaidArticleId = activeClue.siblingPurchasedArticleId;
+        renderArticlesTab();
+      });
+    }
+
+    const buyBtn = $('btn-confirm-buy-article');
+    if (buyBtn && !activeClue.purchased && !activeClue.lockedBySibling) {
+      buyBtn.addEventListener('click', () => handleBuyArticle(activeClue));
+    }
+
+    const relatedBtn = $('btn-paid-related-stock');
+    if (relatedBtn) {
+      relatedBtn.addEventListener('click', () => {
+        navigateToRelatedStock(stock.id);
+      });
+    }
   }
 
   /**
-   * 기사 읽기 화면 하단에 해당 업종 종목들의 추리 태그를 즉시 토글할 수 있는 위젯을 마운트합니다.
-   * (예: 바이오 기사를 읽으면서 A바이오/B바이오에 '비만신약 후보', '백신 후보', '호재 유력' 등을 바로 체크)
+   * 기사 읽기 화면 하단에 공개된 관련 종목의 추리 태그를 즉시 토글할 수 있는 위젯을 마운트합니다.
+   * 주의: 회사가 숨겨진 기사(hideCompanyName: true)에서는 특정 종목과 절대 연결하지 않습니다.
    */
   function mountReaderQuickDeduction(article) {
     const slot = $('reader-quick-deduction-slot');
-    if (!slot || !appState || !article) return;
+    if (!slot || !appState || !article || article.hideCompanyName) return;
 
     const candidateStocks = article.type === 'paid'
       ? appState.stocks.filter((s) => s.id === article.stockId)
-      : appState.stocks.filter((s) => s.industry === article.industry);
+      : appState.stocks.filter((s) => (article.relatedStockIds || []).includes(s.id));
 
     if (candidateStocks.length === 0) return;
 
     const box = document.createElement('div');
     box.className = 'reader-quick-deduction-box';
-    box.innerHTML = `<div class="rqd-header">내 추리 태그 빠른 표시 (${escapeHtml(article.industry)} 업종 종목에 표시하면 시장 목록에도 반영됩니다)</div>`;
+    box.innerHTML = `<div class="rqd-header">내 추리 태그 메모 (시장 목록에도 함께 표시됩니다)</div>`;
 
     for (const st of candidateStocks) {
       const row = document.createElement('div');
@@ -2124,9 +2388,17 @@
    * 탭 전환 헬퍼
    */
   function switchTab(tabName) {
+    if (uiState.activeTab === 'articles') {
+      const listUl = $('article-list-ul');
+      if (listUl) {
+        uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
+      }
+    }
     uiState.activeTab = tabName;
     if (tabName === 'market') {
       uiState.showMyInvestment = false;
+    } else if (tabName === 'articles') {
+      uiState.cameFromArticles = false;
     }
     renderTradingScreen();
   }
@@ -2532,7 +2804,7 @@
     $('btn-mobile-detail-my-inv').addEventListener('click', () => toggleMyInvestment(true));
     $('btn-close-my-investment').addEventListener('click', () => toggleMyInvestment(false));
 
-    // 모바일 뒤로가기 버튼
+    // 모바일 뒤로가기 버튼 및 읽던 기사로 돌아가기 버튼
     $('btn-mobile-back-to-list').addEventListener('click', () => {
       uiState.mobileShowDetail = false;
       uiState.showMyInvestment = false;
@@ -2542,6 +2814,21 @@
       uiState.mobileShowReader = false;
       renderArticlesTab();
     });
+    const backToArticleBtn = $('btn-back-to-reading-article');
+    if (backToArticleBtn) {
+      backToArticleBtn.addEventListener('click', () => {
+        uiState.cameFromArticles = false;
+        switchTab('articles');
+      });
+    }
+
+    // 기사 목록 스크롤 위치 실시간 저장 (시장·채팅 탭 다녀와도 복원)
+    const artListUl = $('article-list-ul');
+    if (artListUl) {
+      artListUl.addEventListener('scroll', () => {
+        uiState.articleScrollTopByNav[uiState.articleNav] = artListUl.scrollTop;
+      });
+    }
 
     // 매수/매도 전환
     $('btn-side-buy').addEventListener('click', () => {
@@ -2609,29 +2896,29 @@
       updateStockDeductionMemo(uiState.selectedStockId, e.target.value);
     });
 
-    // 기사 업종·단서 필터 바
+    // 기사 보관함 업종·단서 필터 바
     document.querySelectorAll('#articles-filter-bar .art-filter-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
         uiState.articleFilter = chip.dataset.filter || 'ALL';
-        uiState.selectedArticleId = null;
+        uiState.selectedArchiveArticleId = null;
+        uiState.articleScrollTopByNav.archive = 0;
         renderArticlesTab();
       });
     });
 
-    // 기사 서브탭 (무료 기사 5 / 유료 기사)
-    $('btn-art-tab-free').addEventListener('click', () => {
-      uiState.selectedArticleType = 'free';
-      if (uiState.articleFilter === 'OWNED') {
-        uiState.articleFilter = 'ALL';
+    // 기사 내부 탐색 3가지 (올해 기사 / 유료 단서 / 보관함)
+    const switchArticleNav = (nextNav) => {
+      const listUl = $('article-list-ul');
+      if (listUl) {
+        uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
       }
-      uiState.selectedArticleId = null;
+      uiState.articleNav = nextNav;
+      uiState.mobileShowReader = false;
       renderArticlesTab();
-    });
-    $('btn-art-tab-paid').addEventListener('click', () => {
-      uiState.selectedArticleType = 'paid';
-      uiState.selectedArticleId = null;
-      renderArticlesTab();
-    });
+    };
+    $('btn-art-nav-current').addEventListener('click', () => switchArticleNav('current_free'));
+    $('btn-art-nav-paid').addEventListener('click', () => switchArticleNav('paid_clues'));
+    $('btn-art-nav-archive').addEventListener('click', () => switchArticleNav('archive'));
 
     // 채팅 채널 및 전송
     $('btn-chat-channel-all').addEventListener('click', () => {

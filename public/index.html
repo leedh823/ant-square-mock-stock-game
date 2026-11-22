@@ -272,7 +272,7 @@
        04 ~ 09. 메인 거래 화면 (시장 · 기사 · 채팅 독립 탭, 기획서 9쪽)
        ===================================================================== -->
   <section id="screen-trading" class="screen hidden">
-    <!-- 상단 공통 상태 바 (현재 연도, 남은 시간, 거래 가능 현금, 총자산, 내 직전 순위) -->
+    <!-- 상단 공통 상태 바 (현재 연도, 남은 시간 + 마감 준비, 거래 가능 현금 집중 배치) -->
     <header class="trading-top-bar">
       <div class="trading-top-left">
         <div class="brand-logo-compact">
@@ -303,14 +303,6 @@
       </div>
 
       <div class="trading-top-right">
-        <div class="asset-metric metric-rank">
-          <span class="metric-label">직전 순위</span>
-          <strong id="top-my-rank" class="metric-value">1위</strong>
-        </div>
-        <div class="asset-metric metric-total">
-          <span class="metric-label">총자산</span>
-          <strong id="top-total-assets" class="metric-value">500,000원</strong>
-        </div>
         <div class="asset-metric metric-cash">
           <span class="metric-label">거래 가능 현금</span>
           <strong id="top-available-cash" class="metric-value highlight-cash">500,000원</strong>
@@ -371,6 +363,12 @@
             <div class="mobile-detail-topbar mobile-only">
               <button type="button" id="btn-mobile-back-to-list" class="btn-back-link">← 종목 목록</button>
               <button type="button" id="btn-mobile-detail-my-inv" class="btn-link-mint">내 투자</button>
+            </div>
+
+            <div id="detail-return-article-bar" class="detail-return-article-bar hidden">
+              <button type="button" id="btn-back-to-reading-article" class="btn-back-article-pill">
+                ← 읽던 기사로 돌아가기
+              </button>
             </div>
 
             <div class="detail-header">
@@ -490,7 +488,7 @@
             </div>
           </div>
 
-          <!-- 오른쪽 B: 내 투자 화면 (현금, 주식 평가액 합계, 종목별 보유·평균매수가·미실현손익, 주문/기사 결제 내역) -->
+          <!-- 오른쪽 B: 내 투자 화면 (총자산, 직전 순위, 거래 가능 현금, 주식 평가액 합계, 종목별 보유·평균매수가·미실현손익, 주문/기사 결제 내역) -->
           <div id="market-portfolio-col" class="market-portfolio-card hidden">
             <div class="card-section-header">
               <div>
@@ -502,16 +500,20 @@
 
             <div class="portfolio-summary-grid">
               <div class="pf-stat-box">
-                <span class="pf-stat-label">보유 현금</span>
+                <span class="pf-stat-label">총자산</span>
+                <strong id="pf-total-assets" class="pf-stat-val highlight-mint">500,000원</strong>
+              </div>
+              <div class="pf-stat-box">
+                <span class="pf-stat-label">직전 순위</span>
+                <strong id="pf-my-rank" class="pf-stat-val">1위</strong>
+              </div>
+              <div class="pf-stat-box">
+                <span class="pf-stat-label">거래 가능 현금</span>
                 <strong id="pf-cash" class="pf-stat-val">500,000원</strong>
               </div>
               <div class="pf-stat-box">
                 <span class="pf-stat-label">주식 평가액 합계</span>
                 <strong id="pf-stock-eval" class="pf-stat-val">0원</strong>
-              </div>
-              <div class="pf-stat-box">
-                <span class="pf-stat-label">총자산</span>
-                <strong id="pf-total-assets" class="pf-stat-val highlight-mint">500,000원</strong>
               </div>
             </div>
 
@@ -528,49 +530,56 @@
         </div>
       </div>
 
-      <!-- ==================== 탭 2: 기사 (무료 기사 5개 + 유료 기사 상점/열람) ==================== -->
+      <!-- ==================== 탭 2: 기사 (올해 기사 / 유료 단서 / 보관함) ==================== -->
       <div id="tab-panel-articles" class="tab-panel hidden">
         <div class="articles-grid">
-          <!-- 왼쪽: 기사 목록 -->
+          <!-- 왼쪽: 기사 내부 탐색 및 목록 -->
           <div id="articles-list-col" class="articles-list-card">
             <div class="card-section-header">
-              <h2 id="articles-year-heading" class="section-title">2011년 기사</h2>
+              <h2 id="articles-year-heading" class="section-title">올해 기사</h2>
+              <span id="articles-section-sublabel" class="stock-count-label">무료 기사 5건</span>
+            </div>
+
+            <!-- 기사 내부 탐색 3가지: 올해 기사 / 유료 단서 / 보관함 -->
+            <div class="article-nav-tabs" role="tablist" aria-label="기사 내부 탐색">
+              <button type="button" id="btn-art-nav-current" class="art-nav-btn active" data-art-nav="current_free">
+                올해 기사
+              </button>
+              <button type="button" id="btn-art-nav-paid" class="art-nav-btn" data-art-nav="paid_clues">
+                유료 단서
+              </button>
+              <button type="button" id="btn-art-nav-archive" class="art-nav-btn" data-art-nav="archive">
+                보관함
+              </button>
+            </div>
+
+            <!-- 보관함 전용 컨트롤 (연도 선택 + 업종·장기 사건·구매 내역 필터는 보관함에서만 표시) -->
+            <div id="articles-archive-controls" class="articles-archive-controls hidden">
               <div id="articles-year-tabs" class="year-archive-pills"></div>
-            </div>
-
-            <div class="article-type-switch" role="tablist">
-              <button type="button" id="btn-art-tab-free" class="art-switch-btn active" data-art-type="free">
-                무료 기사 5
-              </button>
-              <button type="button" id="btn-art-tab-paid" class="art-switch-btn" data-art-type="paid">
-                유료 기사
-              </button>
-            </div>
-
-            <!-- 업종·장기 사건·구매 단서 필터 바 (숨겨진 회사는 업종 단위로만 묶여 조기 노출 방지 - 기획서 5쪽) -->
-            <div id="articles-filter-bar" class="articles-filter-bar">
-              <button type="button" class="art-filter-chip active" data-filter="ALL">전체</button>
-              <button type="button" class="art-filter-chip" data-filter="OWNED">내 구매 단서</button>
-              <button type="button" class="art-filter-chip" data-filter="ARC">장기 사건(2~6년)</button>
-              <button type="button" class="art-filter-chip" data-filter="바이오">바이오</button>
-              <button type="button" class="art-filter-chip" data-filter="반도체">반도체</button>
-              <button type="button" class="art-filter-chip" data-filter="조선">조선</button>
-              <button type="button" class="art-filter-chip" data-filter="엔터">엔터</button>
-              <button type="button" class="art-filter-chip" data-filter="OTHER">식품·게임·항공</button>
+              <div id="articles-filter-bar" class="articles-filter-bar">
+                <button type="button" class="art-filter-chip active" data-filter="ALL">전체</button>
+                <button type="button" class="art-filter-chip" data-filter="OWNED">내 구매 단서</button>
+                <button type="button" class="art-filter-chip" data-filter="ARC">장기 사건(2~6년)</button>
+                <button type="button" class="art-filter-chip" data-filter="바이오">바이오</button>
+                <button type="button" class="art-filter-chip" data-filter="반도체">반도체</button>
+                <button type="button" class="art-filter-chip" data-filter="조선">조선</button>
+                <button type="button" class="art-filter-chip" data-filter="엔터">엔터</button>
+                <button type="button" class="art-filter-chip" data-filter="OTHER">식품·게임·항공</button>
+              </div>
             </div>
 
             <div id="paid-price-banner" class="paid-price-banner hidden">
-              <span>올해 유료 기사 공통 가격</span>
+              <span>올해 유료 단서 공통 가격</span>
               <strong id="paid-common-price-label">11,000원</strong>
             </div>
 
             <ul id="article-list-ul" class="article-list-ul"></ul>
           </div>
 
-          <!-- 오른쪽: 기사 본문 읽기 및 유료 기사 구매 확인 -->
+          <!-- 오른쪽: 기사 본문 읽기 및 유료 단서 비교/결제 -->
           <div id="articles-reader-col" class="articles-reader-card">
             <div class="mobile-detail-topbar mobile-only">
-              <button type="button" id="btn-mobile-back-to-articles" class="btn-back-link">← 기사 목록</button>
+              <button type="button" id="btn-mobile-back-to-articles" class="btn-back-link">← 목록으로</button>
             </div>
             <div id="article-reader-content" class="article-reader-content"></div>
           </div>
