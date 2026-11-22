@@ -18,8 +18,15 @@
 
 const assert = require('node:assert');
 const { EventEmitter } = require('node:events');
-const { server, rooms } = require('./server');
-const { buildArticleFactBrief, validateGeneratedArticle } = require('./aiArticleService');
+const CONFIG = require('./config');
+const { server, rooms, calculateArticlePrice } = require('./server');
+const { generateDynamicScenario } = require('./scenarioData');
+const {
+  buildArticleFactBrief,
+  validateGeneratedArticle,
+  checkPredictiveExpressionLeak,
+  prewarmScenarioArticles
+} = require('./aiArticleService');
 
 function request(method, url, body = null) {
   return new Promise((resolve) => {
@@ -610,6 +617,300 @@ function verifyClueContentAndDisclosureScope(rawRoom) {
   };
 }
 
+/**
+ * 배포본 QA 3개 항목 중 서버·상태 통합 회귀 검증:
+ * - QA 2: 다시 플레이할 때 이전 판 채팅 구분 (3인 친구방 전체 채팅 + 1:1 채팅 판별 구분 및 제3자 1:1 열람 차단)
+ * - QA 3: 주문·기사 결제의 중복 처리 범위 수정 (참가자 ID + 요청 종류 + 요청 ID 기준 멱등성 및 실제 현금·보유수량·열람권한 검증)
+ */
+async function runQaRegressionVerification() {
+  // 1. 3인 친구방 생성 및 참가 (도형, 민지, 현우)
+  const createRes = await request('POST', '/api/rooms/create', {
+    nickname: '도형',
+    roomName: 'QA회귀검증방',
+    capacity: 4,
+    mode: 'friend'
+  });
+  assert.strictEqual(createRes.statusCode, 200);
+  assert.strictEqual(createRes.json.ok, true);
+  const roomCode = createRes.json.roomCode;
+
+  const p1 = {
+    roomCode,
+    participantId: createRes.json.participantId,
+    token: createRes.json.token,
+    nickname: '도형'
+  };
+
+  const join2 = await request('POST', '/api/rooms/join', { nickname: '민지', roomCode });
+  assert.strictEqual(join2.statusCode, 200);
+  const p2 = {
+    roomCode,
+    participantId: join2.json.participantId,
+    token: join2.json.token,
+    nickname: '민지'
+  };
+
+  const join3 = await request('POST', '/api/rooms/join', { nickname: '현우', roomCode });
+  assert.strictEqual(join3.statusCode, 200);
+  const p3 = {
+    roomCode,
+    participantId: join3.json.participantId,
+    token: join3.json.token,
+    nickname: '현우'
+  };
+
+  const start1 = await request('POST', '/api/rooms/start', p1);
+  assert.strictEqual(start1.statusCode, 200);
+
+  // 1번째 판(gameNumber: 1)에서 전체 채팅 및 도형<->민지 1:1 채팅 전송
+  const g1Pub = await request('POST', '/api/rooms/chat', {
+    ...p1,
+    targetId: null,
+    text: '1판 전체 채팅: 첫 판 시작합니다!'
+  });
+  assert.strictEqual(g1Pub.statusCode, 200);
+  assert.strictEqual(g1Pub.json.message.gameNumber, 1);
+
+  const g1Dm1 = await request('POST', '/api/rooms/chat', {
+    ...p1,
+    targetId: p2.participantId,
+    text: '1판 1:1 비밀: 민지님에게만 보내는 첫 판 귓속말'
+  });
+  assert.strictEqual(g1Dm1.statusCode, 200);
+  assert.strictEqual(g1Dm1.json.message.gameNumber, 1);
+
+  const g1Dm2 = await request('POST', '/api/rooms/chat', {
+    ...p2,
+    targetId: p1.participantId,
+    text: '1판 1:1 답장: 도형님 확인했어요!'
+  });
+  assert.strictEqual(g1Dm2.statusCode, 200);
+  assert.strictEqual(g1Dm2.json.message.gameNumber, 1);
+
+  // 다시 플레이(/api/rooms/reset) 호출하여 2번째 판(gameNumber: 2) 진입
+  const resetRes = await request('POST', '/api/rooms/reset', p1);
+  assert.strictEqual(resetRes.statusCode, 200);
+  assert.strictEqual(resetRes.json.ok, true);
+  assert.strictEqual(resetRes.json.state.room.gameNumber, 2);
+
+  // 2번째 판(gameNumber: 2)에서 새 전체 채팅 및 새 1:1 채팅 전송
+  const g2Pub = await request('POST', '/api/rooms/chat', {
+    ...p3,
+    targetId: null,
+    text: '2판 전체 채팅: 새 판에서는 현우가 인사합니다!'
+  });
+  assert.strictEqual(g2Pub.statusCode, 200);
+  assert.strictEqual(g2Pub.json.message.gameNumber, 2);
+
+  const g2Dm = await request('POST', '/api/rooms/chat', {
+    ...p1,
+    targetId: p2.participantId,
+    text: '2판 1:1 비밀: 새 판에서 민지님과 나누는 귓속말'
+  });
+  assert.strictEqual(g2Dm.statusCode, 200);
+  assert.strictEqual(g2Dm.json.message.gameNumber, 2);
+
+  // 각 참가자별 세션 상태 조회로 이전 판 / 현재 판 분리 및 제3자(현우) 1:1 격리 검증
+  const getParticipantState = async (p) => {
+    const qs = new URLSearchParams({
+      roomCode: p.roomCode,
+      participantId: p.participantId,
+      token: p.token
+    });
+    const res = await request('GET', `/api/session?${qs.toString()}`);
+    assert.strictEqual(res.statusCode, 200);
+    return res.json.state;
+  };
+
+  const stateP1 = await getParticipantState(p1);
+  const stateP2 = await getParticipantState(p2);
+  const stateP3 = await getParticipantState(p3);
+
+  // 도형(p1)과 민지(p2): 현재 판 대화 2건(2판 전체 1 + 2판 1:1 1), 이전 판 대화 3건(1판 전체 1 + 1판 1:1 2)
+  assert.strictEqual(stateP1.currentGameChats.length, 2, '새 판의 현재 판 대화에는 2판 메시지만 포함되어야 합니다.');
+  assert.strictEqual(stateP1.previousGameChats.length, 3, '이전 판 대화에는 1판 메시지 3건이 분리되어 유지되어야 합니다.');
+  assert.ok(stateP1.currentGameChats.every((m) => m.gameNumber === 2 && m.isCurrentGame === true));
+  assert.ok(stateP1.previousGameChats.every((m) => m.gameNumber === 1 && m.isCurrentGame === false));
+
+  assert.strictEqual(stateP2.currentGameChats.length, 2);
+  assert.strictEqual(stateP2.previousGameChats.length, 3);
+
+  // 제3자 현우(p3): 현재 판 대화 1건(2판 전체 1), 이전 판 대화 1건(1판 전체 1) -> 1:1 메시지는 현재 판/이전 판 어디에도 노출되지 않아야 함
+  assert.strictEqual(stateP3.currentGameChats.length, 1, '현우의 현재 판 대화에는 2판 전체 채팅 1건만 보여야 합니다.');
+  assert.strictEqual(stateP3.previousGameChats.length, 1, '현우가 이전 판 대화를 열어도 1판 전체 채팅 1건만 보이고 제3자 1:1 대화는 절대 노출되면 안 됩니다.');
+  assert.strictEqual(stateP3.chats.length, 2);
+  assert.ok(
+    stateP3.chats.every((m) => m.targetId === null),
+    '제3자(현우)에게는 이전 판과 현재 판 모두 다른 참가자 간 1:1 메시지가 전달되면 안 됩니다.'
+  );
+
+  // ---------------------------------------------------------------------------
+  // QA 3: 주문·기사 결제의 중복 처리 범위 검증 (참가자 ID + 요청 종류 + 요청 ID)
+  // ---------------------------------------------------------------------------
+  // 2번째 판 게임 시작 -> 튜토리얼 완료(2010 거래) -> 2010 마감(2011 개장) -> 2011 거래 시작
+  await request('POST', '/api/rooms/start', p1);
+  for (const p of [p1, p2, p3]) {
+    await request('POST', '/api/rooms/ready', { ...p, ready: true }); // TUTORIAL -> 2010 TRADING
+  }
+  for (const p of [p1, p2, p3]) {
+    await request('POST', '/api/rooms/ready', { ...p, ready: true }); // 2010 TRADING -> 2011 OPENING
+  }
+  for (const p of [p1, p2, p3]) {
+    await request('POST', '/api/rooms/ready', { ...p, ready: true }); // 2011 OPENING -> 2011 TRADING
+  }
+
+  const s1Before = await getParticipantState(p1);
+  const s2Before = await getParticipantState(p2);
+  assert.strictEqual(s1Before.room.status, 'TRADING');
+  assert.strictEqual(s1Before.room.currentYear, 2011);
+
+  const cash1Start = s1Before.me.cash;
+  const cash2Start = s2Before.me.cash;
+  const artPrice2011 = s1Before.room.currentArticlePrice;
+  const aEnterPrice = s1Before.stocks.find((s) => s.id === 'a_enter').currentPrice;
+  const bEnterPrice = s1Before.stocks.find((s) => s.id === 'b_enter').currentPrice;
+
+  const paid2011 = s1Before.articlesByYear[2011].paid;
+  const aEnterPaid = paid2011.find((a) => a.stockId === 'a_enter');
+  const bEnterPaid = paid2011.find((a) => a.stockId === 'b_enter');
+  assert.ok(aEnterPaid && bEnterPaid);
+
+  // Case 3-A: 서로 다른 참가자(도형, 민지)가 동일한 requestId('SHARED_ORDER_REQ_ID')로 각각 주문 전송
+  const sharedOrderReqId = 'SHARED_ORDER_REQ_ID';
+  const ordP1 = await request('POST', '/api/rooms/order', {
+    ...p1,
+    year: 2011,
+    stockId: 'a_enter',
+    side: 'BUY',
+    quantity: 2,
+    requestId: sharedOrderReqId
+  });
+  const ordP2 = await request('POST', '/api/rooms/order', {
+    ...p2,
+    year: 2011,
+    stockId: 'a_enter',
+    side: 'BUY',
+    quantity: 4,
+    requestId: sharedOrderReqId
+  });
+
+  assert.strictEqual(ordP1.statusCode, 200);
+  assert.strictEqual(ordP2.statusCode, 200);
+  assert.strictEqual(ordP1.json.ok, true);
+  assert.strictEqual(ordP2.json.ok, true);
+  assert.strictEqual(ordP1.json.order.participantId, p1.participantId);
+  assert.strictEqual(ordP2.json.order.participantId, p2.participantId);
+  assert.strictEqual(ordP1.json.order.quantity, 2);
+  assert.strictEqual(ordP2.json.order.quantity, 4);
+
+  // Case 3-B: 서로 다른 참가자(도형, 민지)가 동일한 requestId('SHARED_ARTICLE_REQ_ID')로 유료 기사 구매
+  const sharedArticleReqId = 'SHARED_ARTICLE_REQ_ID';
+  const buyArtP1 = await request('POST', '/api/rooms/buy-article', {
+    ...p1,
+    year: 2011,
+    articleId: aEnterPaid.id,
+    requestId: sharedArticleReqId
+  });
+  const buyArtP2 = await request('POST', '/api/rooms/buy-article', {
+    ...p2,
+    year: 2011,
+    articleId: aEnterPaid.id,
+    requestId: sharedArticleReqId
+  });
+
+  assert.strictEqual(buyArtP1.statusCode, 200);
+  assert.strictEqual(buyArtP2.statusCode, 200);
+  assert.strictEqual(buyArtP1.json.ok, true);
+  assert.strictEqual(buyArtP2.json.ok, true);
+  assert.strictEqual(buyArtP1.json.alreadyOwned, false);
+  assert.strictEqual(buyArtP2.json.alreadyOwned, false);
+
+  // Case 3-C: 같은 참가자(도형)가 주문과 기사 구매에 동일한 requestId('SAME_USER_ORDER_AND_ARTICLE_ID')를 사용
+  const crossTypeReqId = 'SAME_USER_ORDER_AND_ARTICLE_ID';
+  const crossOrdP1 = await request('POST', '/api/rooms/order', {
+    ...p1,
+    year: 2011,
+    stockId: 'b_enter',
+    side: 'BUY',
+    quantity: 3,
+    requestId: crossTypeReqId
+  });
+  const crossArtP1 = await request('POST', '/api/rooms/buy-article', {
+    ...p1,
+    year: 2011,
+    articleId: bEnterPaid.id,
+    requestId: crossTypeReqId
+  });
+
+  assert.strictEqual(crossOrdP1.statusCode, 200);
+  assert.strictEqual(crossArtP1.statusCode, 200);
+  assert.strictEqual(crossOrdP1.json.ok, true);
+  assert.strictEqual(crossArtP1.json.ok, true);
+  assert.ok(crossOrdP1.json.order && crossOrdP1.json.order.stockId === 'b_enter');
+  assert.strictEqual(crossArtP1.json.articleId, bEnterPaid.id);
+  assert.strictEqual(crossArtP1.json.alreadyOwned, false);
+
+  // Case 3-D: 같은 참가자(도형)가 같은 주문 및 같은 기사 구매 요청을 재전송하면 한 번만 처리(추가 차감/체결 없음)
+  const retryOrdP1 = await request('POST', '/api/rooms/order', {
+    ...p1,
+    year: 2011,
+    stockId: 'b_enter',
+    side: 'BUY',
+    quantity: 3,
+    requestId: crossTypeReqId
+  });
+  const retryArtP1 = await request('POST', '/api/rooms/buy-article', {
+    ...p1,
+    year: 2011,
+    articleId: bEnterPaid.id,
+    requestId: crossTypeReqId
+  });
+  assert.strictEqual(retryOrdP1.json.order.id, crossOrdP1.json.order.id, '동일 참가자의 동일 주문 재전송은 첫 처리 결과를 반환해야 합니다.');
+  assert.strictEqual(retryArtP1.json.payment.id, crossArtP1.json.payment.id, '동일 참가자의 동일 기사 구매 재전송은 첫 결제 결과를 반환해야 합니다.');
+
+  // 실제 현금, 보유 수량, 기사 열람 권한 최종 대조
+  const s1After = await getParticipantState(p1);
+  const s2After = await getParticipantState(p2);
+  const s3After = await getParticipantState(p3);
+
+  const expectedP1Cash = cash1Start - (2 * aEnterPrice) - artPrice2011 - (3 * bEnterPrice) - artPrice2011;
+  const expectedP2Cash = cash2Start - (4 * aEnterPrice) - artPrice2011;
+
+  assert.strictEqual(s1After.me.cash, expectedP1Cash, '도형의 실제 보유 현금이 주문 2건 + 기사 2건 결제 금액만큼 정확히 차감되어야 합니다.');
+  assert.strictEqual(s2After.me.cash, expectedP2Cash, '민지의 실제 보유 현금이 주문 1건 + 기사 1건 결제 금액만큼 정확히 차감되어야 합니다.');
+
+  const p1AEnterQty = s1After.me.holdingsDetail.find((h) => h.stockId === 'a_enter').quantity;
+  const p1BEnterQty = s1After.me.holdingsDetail.find((h) => h.stockId === 'b_enter').quantity;
+  const p2AEnterQty = s2After.me.holdingsDetail.find((h) => h.stockId === 'a_enter').quantity;
+  assert.strictEqual(p1AEnterQty, 2, '도형의 A엔터 실제 보유 수량은 2주여야 합니다.');
+  assert.strictEqual(p1BEnterQty, 3, '도형의 B엔터 실제 보유 수량은 3주여야 합니다.');
+  assert.strictEqual(p2AEnterQty, 4, '민지의 A엔터 실제 보유 수량은 4주여야 합니다.');
+
+  const p1AEnterArtView = s1After.articlesByYear[2011].paid.find((a) => a.id === aEnterPaid.id);
+  const p1BEnterArtView = s1After.articlesByYear[2011].paid.find((a) => a.id === bEnterPaid.id);
+  const p2AEnterArtView = s2After.articlesByYear[2011].paid.find((a) => a.id === aEnterPaid.id);
+  const p2BEnterArtView = s2After.articlesByYear[2011].paid.find((a) => a.id === bEnterPaid.id);
+  const p3AEnterArtView = s3After.articlesByYear[2011].paid.find((a) => a.id === aEnterPaid.id);
+
+  assert.ok(p1AEnterArtView.purchased && p1AEnterArtView.body, '도형은 A엔터 유료 기사 열람 권한과 본문을 가져야 합니다.');
+  assert.ok(p1BEnterArtView.purchased && p1BEnterArtView.body, '도형은 주문과 같은 requestId로 구매한 B엔터 유료 기사 열람 권한과 본문을 가져야 합니다.');
+  assert.ok(p2AEnterArtView.purchased && p2AEnterArtView.body, '민지는 도형과 같은 requestId로 구매한 A엔터 유료 기사 열람 권한과 본문을 가져야 합니다.');
+  assert.ok(!p2BEnterArtView.purchased && !p2BEnterArtView.body, '민지가 구매하지 않은 B엔터 유료 기사는 본문이 노출되면 안 됩니다.');
+  assert.ok(!p3AEnterArtView.purchased && !p3AEnterArtView.body, '현우가 구매하지 않은 유료 기사는 본문이 노출되면 안 됩니다.');
+
+  return {
+    p1CurrentChats: stateP1.currentGameChats.length,
+    p1PrevChats: stateP1.previousGameChats.length,
+    p3CurrentChats: stateP3.currentGameChats.length,
+    p3PrevChats: stateP3.previousGameChats.length,
+    expectedP1Cash,
+    expectedP2Cash,
+    p1AEnterQty,
+    p1BEnterQty,
+    p2AEnterQty
+  };
+}
+
 async function runVerification() {
   console.log('=== [개미광장] 유료 단서 유형 선택(일정 단서 vs 사업 리스크 단서) 및 내 투자 복기 통합 검증 ===\n');
 
@@ -702,6 +1003,112 @@ async function runVerification() {
   assert.ok(cssStr.includes('.paid-stock-row'));
 
   console.log('\n[통과] 5. 1차 UI 개선(거래 공통 헤더 간소화, 내 투자 총자산·직전 순위 배치, 기사 탭 올해 기사/유료 단서/보관함 3분할 및 종목별 한 줄, 관련 종목 보기, 읽던 기사·목록 위치 복원) 검증 완료');
+
+  const qaRes = await runQaRegressionVerification();
+  console.log('\n[통과] 6. 다시 플레이 시 이전 판 채팅 구분 및 3인 친구방 1:1 비밀 대화 격리 검증 완료:');
+  console.log(`   · 당사자(도형·민지) 2번째 판 조회: 현재 판 대화 ${qaRes.p1CurrentChats}건 / 이전 판 대화 ${qaRes.p1PrevChats}건 분리`);
+  console.log(`   · 제3자(현우) 2번째 판 조회: 현재 판 대화 ${qaRes.p3CurrentChats}건 / 이전 판 대화 ${qaRes.p3PrevChats}건 (타인 1:1 메시지 0건)`);
+
+  console.log('\n[통과] 7. 주문·기사 결제 중복 처리 범위(참가자 ID + 요청 종류 + 요청 ID) 및 실제 현금·보유수량·열람권한 검증 완료:');
+  console.log(`   · 도형(p1): 현금 ${qaRes.expectedP1Cash.toLocaleString()}원 / A엔터 ${qaRes.p1AEnterQty}주 / B엔터 ${qaRes.p1BEnterQty}주 / 유료 기사 2건 본문 열람 확인`);
+  console.log(`   · 민지(p2): 현금 ${qaRes.expectedP2Cash.toLocaleString()}원 / A엔터 ${qaRes.p2AEnterQty}주 / 유료 기사 1건 본문 열람 확인`);
+
+  // ---------------------------------------------------------------------------
+  // 8. 플레이 피드백 반영 검증 (기사 콘텐츠 품질, 25% 가격 인상, 15초 경고, 채팅 알림, BGM)
+  // ---------------------------------------------------------------------------
+  // (a) 신규 동적 시나리오 생성 후 전 연도 무료 기사 & 유료 단서의 다문단 구조(2~3문단) 및 미래 상승·하락·확정 등락률 금지 검사
+  const freshScenario = generateDynamicScenario([]);
+  await prewarmScenarioArticles({ scenario: freshScenario });
+  let checkedFreeCount = 0;
+  let checkedPaidCount = 0;
+  for (let y = 2011; y <= 2019; y++) {
+    const yd = freshScenario.articlesByYear[y];
+    for (const f of yd.free || []) {
+      checkedFreeCount++;
+      const paras = String(f.body || '').split(/\n{2,}/).filter(Boolean);
+      assert.ok(paras.length >= 2 && paras.length <= 3, `[${y}년 무료 기사 ${f.id}] 본문은 2~3개의 짧은 문단이어야 합니다. (실제: ${paras.length})`);
+      for (const field of [f.title, f.summary, f.body]) {
+        const leak = checkPredictiveExpressionLeak(field);
+        assert.strictEqual(leak, null, `[${y}년 무료 기사 ${f.id}] 미래 결과 추정 표현이 포함되면 안 됩니다: ${leak} -> "${field}"`);
+      }
+    }
+    for (const p of yd.paid || []) {
+      checkedPaidCount++;
+      const paras = String(p.body || '').split(/\n{2,}/).filter(Boolean);
+      assert.ok(paras.length >= 2 && paras.length <= 3, `[${y}년 유료 단서 ${p.id}] 본문은 2~3개의 짧은 문단이어야 합니다. (실제: ${paras.length})`);
+      for (const field of [p.preTitle, p.whatItTells, p.subtitle, p.postTitle, p.body, p.highlightNote]) {
+        const leak = checkPredictiveExpressionLeak(field);
+        assert.strictEqual(leak, null, `[${y}년 유료 단서 ${p.id}] 미래 결과 추정 표현이 포함되면 안 됩니다: ${leak} -> "${field}"`);
+      }
+    }
+  }
+
+  // 외부 AI 기사 생성 경로 검증기: '급등 기대', '하락 전망', '+15%' 등 차단 확인
+  const aiLeakBrief = buildArticleFactBrief({
+    id: 'test_ai_leak',
+    year: 2012,
+    type: 'paid',
+    stockName: 'A조선',
+    industry: '조선',
+    hideCompanyName: false,
+    disclosedFacts: ['A조선 금융 보증 심사 진행']
+  });
+  const predictiveTitleReject = validateGeneratedArticle(
+    { title: 'A조선 대형 수주 급등 기대', body: 'A조선이 협상을 진행 중이다.\n\n보증 심사는 하반기 예정이다.' },
+    aiLeakBrief
+  );
+  assert.strictEqual(predictiveTitleReject.valid, false, '외부 AI 경로에서도 급등 기대 등 결과 추정 제목은 차단되어야 합니다.');
+
+  // (b) 유료 기사 가격 25% 인상 설정값 및 공통 가격 계산 공식 검증
+  assert.strictEqual(CONFIG.ARTICLE_PRICE_RATE, 0.02);
+  assert.strictEqual(CONFIG.ARTICLE_PRICE_INCREASE_RATE, 0.25);
+  assert.strictEqual(
+    calculateArticlePrice([550000, 550000, 550000]),
+    13000,
+    '총자산 중앙값 550,000원 기준 현행 2% 대비 25% 인상(2.5% = 13,750원 -> 1,000원 단위 내림)은 13,000원이어야 합니다.'
+  );
+  assert.strictEqual(
+    calculateArticlePrice([1000000, 1000000]),
+    25000,
+    '총자산 중앙값 1,000,000원 기준 2.5%는 25,000원이어야 합니다.'
+  );
+
+  // (c) 15초 경고, 채팅 알림, BGM 컨트롤 마크업 및 오디오 파일 서빙 검증
+  assert.ok(htmlStr.includes('id="trading-15s-warning-banner"'));
+  assert.ok(htmlStr.includes('거래 마감까지 30초 남았어요'));
+  assert.ok(jsStr.includes('remainingMs <= 30000'), '마감 경고는 남은 시간 30초 이하에서 표시되어야 합니다.');
+  assert.ok(!jsStr.includes('activeClue.highlightNote') && !jsStr.includes('pArt.highlightNote'), '기사 본문 아래 요약 정리 박스는 표시하지 않아야 합니다.');
+  assert.ok(htmlStr.includes('id="mobile-tab-chat-badge"'));
+  assert.ok(htmlStr.includes('id="chat-all-unread-badge"'));
+  assert.ok(htmlStr.includes('id="btn-bgm-toggle"'));
+  assert.ok(jsStr.includes('trigger15SecWarningOnceForRound'));
+  assert.ok(jsStr.includes('markActiveChatChannelAsRead'));
+  assert.ok(jsStr.includes('ant_square_bgm_enabled_v1'));
+
+  const bgmRes = await request('GET', '/audio/bgm-ambient.wav');
+  assert.strictEqual(bgmRes.statusCode, 200);
+  assert.strictEqual(bgmRes.headers['Content-Type'], 'audio/wav');
+  assert.strictEqual(bgmRes.body.slice(0, 4).toString('ascii'), 'RIFF');
+  assert.strictEqual(bgmRes.body.slice(8, 12).toString('ascii'), 'WAVE');
+
+  console.log(`\n[통과] 8. 플레이 피드백 5종 자동 검증 완료:`);
+  console.log(`   · 기사 품질 검사: 무료 기사 ${checkedFreeCount}건 + 유료 단서 ${checkedPaidCount}건 전수 2~3문단 구조 및 결과 추정/등락률 누출 0건`);
+  console.log(`   · 유료 기사 가격: 기준 비율 ${(CONFIG.ARTICLE_PRICE_RATE * 100).toFixed(1)}% + 인상률 ${(CONFIG.ARTICLE_PRICE_INCREASE_RATE * 100).toFixed(0)}% (중앙값 550,000원 -> 13,000원)`);
+  console.log(`   · BGM 음원 서빙: /audio/bgm-ambient.wav (HTTP 200, audio/wav, ${bgmRes.body.length.toLocaleString()} bytes)`);
+
+  // 바이오·조선·반도체 실제 생성된 무료 기사 샘플 출력
+  const sampleBioFree = freshScenario.articlesByYear[2011].free.find((a) => a.industry === '바이오');
+  const sampleShipFree = freshScenario.articlesByYear[2011].free.find((a) => a.industry === '조선');
+  let sampleSemiFree = null;
+  for (let y = 2011; y <= 2014; y++) {
+    sampleSemiFree = (freshScenario.articlesByYear[y].free || []).find((a) => a.industry === '반도체');
+    if (sampleSemiFree) break;
+  }
+  console.log('\n=== [실제 생성된 바이오·조선·반도체 무료 기사 샘플] ===');
+  for (const s of [sampleBioFree, sampleShipFree, sampleSemiFree].filter(Boolean)) {
+    console.log(`\n[${s.year}년 ${s.industry}] 제목: ${s.title}`);
+    console.log(`본문:\n${s.body}`);
+  }
 
   console.log('\n=== 모든 검증 통과 ===');
   process.exit(0);

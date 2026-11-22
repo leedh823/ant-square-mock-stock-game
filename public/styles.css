@@ -1759,6 +1759,68 @@ ul {
   color: #e9fff8;
 }
 
+.prev-game-chat-section {
+  border: 1px solid var(--border-subtle);
+  background: rgba(9, 20, 28, 0.72);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-prev-game-chat-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: transparent;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.btn-prev-game-chat-toggle:hover {
+  color: var(--accent-mint);
+}
+
+.prev-chat-toggle-label {
+  font-size: 11.5px;
+  color: var(--accent-mint);
+}
+
+.prev-game-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.current-game-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.chat-game-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(155, 178, 192, 0.14);
+  color: var(--text-secondary);
+}
+
+.chat-msg-row.prev-game-msg .chat-bubble {
+  opacity: 0.85;
+}
+
 .chat-input-row {
   display: flex;
   gap: 10px;
@@ -3268,4 +3330,133 @@ body,
     right: 12px;
     max-width: none;
   }
+
+  .trading-15s-warning {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+
+  .bgm-toggle-btn {
+    bottom: 68px;
+    right: 12px;
+    padding: 6px 10px;
+    font-size: 11.5px;
+  }
+}
+
+/* ==========================================================================
+   플레이 피드백 반영: 다문단 기사 본문 · 15초 마감 경고 · 채팅 알림 · BGM 컨트롤
+   ========================================================================== */
+
+.reader-body-paragraphs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.reader-body-paragraphs .reader-body-p {
+  margin-bottom: 0;
+  line-height: 1.72;
+}
+
+.trading-15s-warning {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff3e6;
+  background: rgba(255, 107, 91, 0.22);
+  border: 1px solid rgba(255, 107, 91, 0.65);
+  white-space: nowrap;
+  animation: pulseWarn15 1.2s ease-in-out infinite;
+}
+
+@keyframes pulseWarn15 {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+.chat-channel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-dm-item {
+  justify-content: space-between;
+}
+
+.chat-dm-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ff6b5b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mobile-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.mobile-tab-badge {
+  position: static;
+  margin-left: 2px;
+}
+
+.bgm-toggle-btn {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(11, 27, 36, 0.9);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.bgm-toggle-btn:hover {
+  border-color: var(--accent-mint);
+  color: var(--text-primary);
+}
+
+.bgm-toggle-btn.is-on {
+  background: rgba(18, 49, 46, 0.92);
+  border-color: var(--accent-mint);
+  color: var(--accent-mint);
+}
+
+.bgm-icon {
+  font-size: 13px;
+  line-height: 1;
 }

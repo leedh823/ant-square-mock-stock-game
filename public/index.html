@@ -16,6 +16,18 @@
   <!-- 토스트 알림 -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
+  <!-- 앱 전역 BGM 켜기/끄기 컨트롤 (첫 방문은 꺼짐, 사용자 선택 시 저장) -->
+  <button
+    type="button"
+    id="btn-bgm-toggle"
+    class="bgm-toggle-btn"
+    aria-pressed="false"
+    title="배경음악 켜기/끄기"
+  >
+    <span id="bgm-toggle-icon" class="bgm-icon" aria-hidden="true">🔇</span>
+    <span id="bgm-toggle-label">BGM 꺼짐</span>
+  </button>
+
   <!-- =====================================================================
        01. 입장과 모드 선택 화면 (기획서 8쪽, 웹/모바일 시안 01)
        ===================================================================== -->
@@ -293,6 +305,9 @@
 
         <div class="timer-group">
           <span id="trading-timer-pill" class="timer-pill">00:45</span>
+          <span id="trading-15s-warning-banner" class="trading-15s-warning hidden" role="status" aria-live="polite">
+            거래 마감까지 30초 남았어요
+          </span>
           <button type="button" id="btn-trading-ready" class="btn-ready-compact" title="참가자 전원이 누르면 남은 시간을 기다리지 않고 즉시 마감하고 다음 해를 개장합니다.">
             마감 준비
           </button>
@@ -593,7 +608,8 @@
           <div class="chat-sidebar-card">
             <h2 class="section-title">채팅</h2>
             <button type="button" id="btn-chat-channel-all" class="chat-channel-btn active">
-              전체 방
+              <span>전체 방</span>
+              <span id="chat-all-unread-badge" class="chat-unread-badge hidden">0</span>
             </button>
 
             <div class="chat-dm-section">
@@ -631,7 +647,10 @@
     <nav class="mobile-bottom-nav mobile-only" aria-label="모바일 하단 탭">
       <button type="button" class="mobile-nav-btn active" data-tab="market">시장</button>
       <button type="button" class="mobile-nav-btn" data-tab="articles">기사</button>
-      <button type="button" class="mobile-nav-btn" data-tab="chat">채팅</button>
+      <button type="button" class="mobile-nav-btn" data-tab="chat">
+        <span>채팅</span>
+        <span id="mobile-tab-chat-badge" class="tab-badge mobile-tab-badge hidden">0</span>
+      </button>
     </nav>
   </section>
 

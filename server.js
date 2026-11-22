@@ -164,8 +164,8 @@ function computeRanks(items, valueSelector) {
 }
 
 /**
- * 유료 기사 공통 가격 계산 (기획서 3쪽, 14쪽)
- * 연간 지원금 지급 후 총자산 중앙값 * 2%를 1,000원 단위로 내림하고 최소 1,000원을 적용한다.
+ * 유료 기사 공통 가격 계산 (기획서 3쪽, 14쪽 + 인상률 설정값 분리)
+ * 연간 지원금 지급 후 총자산 중앙값 * (기준 비율 * (1 + 인상률))을 1,000원 단위로 내림하고 최소 1,000원을 적용한다.
  * 짝수 인원의 중앙값은 가운데 두 금액의 평균이다.
  */
 function calculateArticlePrice(postGrantAssetsList) {
@@ -180,7 +180,11 @@ function calculateArticlePrice(postGrantAssetsList) {
   } else {
     median = (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
   }
-  const rawPrice = median * CONFIG.ARTICLE_PRICE_RATE;
+  const increaseRate = Number.isFinite(CONFIG.ARTICLE_PRICE_INCREASE_RATE)
+    ? CONFIG.ARTICLE_PRICE_INCREASE_RATE
+    : 0;
+  const effectiveRate = CONFIG.ARTICLE_PRICE_RATE * (1 + increaseRate);
+  const rawPrice = median * effectiveRate;
   const floored = Math.floor(rawPrice / CONFIG.ARTICLE_PRICE_UNIT) * CONFIG.ARTICLE_PRICE_UNIT;
   return Math.max(CONFIG.ARTICLE_MIN_PRICE, floored);
 }
@@ -248,6 +252,7 @@ function createRoom({
     mode, // 'friend' | 'solo'
     capacity: mode === 'solo' ? 4 : Math.min(CONFIG.FRIEND_ROOM_MAX_PLAYERS, Math.max(CONFIG.FRIEND_ROOM_MIN_PLAYERS, Number(capacity) || CONFIG.FRIEND_ROOM_DEFAULT_CAPACITY)),
     hostId: host.id,
+    gameNumber: 1,
     status: 'WAITING', // 'WAITING' | 'TUTORIAL' | 'TRADING' | 'OPENING' | 'SETTLEMENT'
     currentYear: CONFIG.START_YEAR,
     phaseStartedAt: Date.now(),
@@ -257,10 +262,10 @@ function createRoom({
     currentArticlePrice: 0,
     actionSeq: 0,                 // 방 내 주문·기사 구매의 엄격한 체결 선후 순서 번호
     participants,
-    processedRequests: new Map(), // requestId -> cached response
+    processedRequests: new Map(), // `${participantId}:${actionType}:${requestId}` -> cached response
     openingHistory: {},           // year -> openingSnapshot
     settlementResult: null,
-    chats: [],                    // [{ id, senderId, senderNickname, targetId, text, timestamp, year }]
+    chats: [],                    // [{ id, gameNumber, scenarioId, senderId, senderNickname, targetId, text, timestamp, year }]
     createdAt: Date.now()
   };
 
@@ -683,12 +688,22 @@ function runBotsForTradingYear(room, year) {
 }
 
 /**
+ * 중복 요청(멱등성) 식별 키 생성
+ * 기준: 참가자 ID + 요청 종류('ORDER' | 'BUY_ARTICLE') + 요청 ID
+ */
+function buildIdempotencyKey(participantId, actionType, requestId) {
+  if (!requestId) return null;
+  return `${participantId}:${actionType}:${requestId}`;
+}
+
+/**
  * 주식 매수·매도 주문 처리 (기획서 3쪽, 12쪽)
  */
 function executeStockOrder(room, participant, { year, stockId, side, quantity, requestId }) {
-  // 1. 요청 ID 멱등성 확인 (동일 요청을 재전송해도 한 번만 처리)
-  if (requestId && room.processedRequests.has(requestId)) {
-    return room.processedRequests.get(requestId);
+  // 1. 요청 ID 멱등성 확인 (동일 참가자가 동일 주문 요청을 재전송했을 때만 한 번만 처리)
+  const idempotencyKey = buildIdempotencyKey(participant.id, 'ORDER', requestId);
+  if (idempotencyKey && room.processedRequests.has(idempotencyKey)) {
+    return room.processedRequests.get(idempotencyKey);
   }
 
   // 2. 거래 가능 상태 및 마감/연도 검증
@@ -792,8 +807,8 @@ function executeStockOrder(room, participant, { year, stockId, side, quantity, r
     message: `${stock.name} ${parsedQty}주 ${side === 'BUY' ? '매수' : '매도'} 주문이 체결되었습니다.`
   };
 
-  if (requestId) {
-    room.processedRequests.set(requestId, response);
+  if (idempotencyKey) {
+    room.processedRequests.set(idempotencyKey, response);
   }
   return response;
 }
@@ -802,9 +817,10 @@ function executeStockOrder(room, participant, { year, stockId, side, quantity, r
  * 유료 기사 구매 처리 (기획서 3쪽, 5쪽, 10쪽, 12쪽)
  */
 function executeArticlePurchase(room, participant, { year, articleId, requestId }) {
-  // 1. 동일 요청 ID 멱등성 처리
-  if (requestId && room.processedRequests.has(requestId)) {
-    return room.processedRequests.get(requestId);
+  // 1. 동일 참가자 + 기사 구매 요청 종류 + 요청 ID 기준 멱등성 처리
+  const idempotencyKey = buildIdempotencyKey(participant.id, 'BUY_ARTICLE', requestId);
+  if (idempotencyKey && room.processedRequests.has(idempotencyKey)) {
+    return room.processedRequests.get(idempotencyKey);
   }
 
   // 2. 이미 구매한 기사인지 확인 (기획서 3쪽: 이미 산 기사를 다시 열면 현금은 그대로다. 기사 소유권은 참가자·기사 ID 단위로 1회만 부여)
@@ -815,8 +831,8 @@ function executeArticlePurchase(room, participant, { year, articleId, requestId 
       articleId,
       message: '이미 구매한 기사입니다. 추가 차감 없이 본문을 열람합니다.'
     };
-    if (requestId) {
-      room.processedRequests.set(requestId, response);
+    if (idempotencyKey) {
+      room.processedRequests.set(idempotencyKey, response);
     }
     return response;
   }
@@ -869,8 +885,8 @@ function executeArticlePurchase(room, participant, { year, articleId, requestId 
       alreadyChosenTitle: existingSameStockPayment.preTitle,
       message: '이 종목의 올해 유료 단서는 하나만 구매할 수 있어요. (올해 단서 선택 완료)'
     };
-    if (requestId) {
-      room.processedRequests.set(requestId, choiceLockedResponse);
+    if (idempotencyKey) {
+      room.processedRequests.set(idempotencyKey, choiceLockedResponse);
     }
     return choiceLockedResponse;
   }
@@ -918,8 +934,8 @@ function executeArticlePurchase(room, participant, { year, articleId, requestId 
     message: `'${targetArticle.preTitle}' 유료 단서를 ${price.toLocaleString()}원에 구매했습니다.`
   };
 
-  if (requestId) {
-    room.processedRequests.set(requestId, response);
+  if (idempotencyKey) {
+    room.processedRequests.set(idempotencyKey, response);
   }
   return response;
 }
@@ -1582,9 +1598,20 @@ function serializeRoomForParticipant(room, participantId) {
   }
 
   // 5. 내가 볼 권한이 있는 채팅 메시지 (전체 메시지 + 나와 관련된 1:1 메시지)
-  const visibleChats = room.chats.filter(
-    (msg) => msg.targetId === null || msg.senderId === me.id || msg.targetId === me.id
-  );
+  //    다시 플레이할 때도 이전 판 기록은 유지하되 gameNumber / isCurrentGame으로 현재 판과 이전 판을 명확히 구분
+  const currentGameNumber = room.gameNumber || 1;
+  const visibleChats = room.chats
+    .filter((msg) => msg.targetId === null || msg.senderId === me.id || msg.targetId === me.id)
+    .map((msg) => {
+      const msgGameNumber = msg.gameNumber || 1;
+      return {
+        ...msg,
+        gameNumber: msgGameNumber,
+        isCurrentGame: msgGameNumber === currentGameNumber
+      };
+    });
+  const currentGameChats = visibleChats.filter((msg) => msg.isCurrentGame);
+  const previousGameChats = visibleChats.filter((msg) => !msg.isCurrentGame);
 
   // 6. 개장 결과 및 최종 정산 스냅샷 필터링 (일반 연도는 내 결과만, 2015년 중간 점검과 2020년 최종 정산만 전체 순위표 포함)
   const rawCurrentOpening = room.openingHistory[room.currentYear] || null;
@@ -1617,6 +1644,7 @@ function serializeRoomForParticipant(room, participantId) {
       mode: room.mode,
       capacity: room.capacity,
       hostId: room.hostId,
+      gameNumber: currentGameNumber,
       status: room.status,
       currentYear: room.currentYear,
       roundIndex: Math.min(10, Math.max(1, room.currentYear - CONFIG.START_YEAR + 1)),
@@ -1651,7 +1679,9 @@ function serializeRoomForParticipant(room, participantId) {
     currentOpeningResult,
     openingHistory: filteredOpeningHistory,
     settlementResult,
-    chats: visibleChats
+    chats: visibleChats,
+    currentGameChats,
+    previousGameChats
   };
 }
 
@@ -1737,7 +1767,10 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg'
 };
 
 function serveStaticFile(res, filePath) {
@@ -2164,6 +2197,8 @@ const server = http.createServer(async (req, res) => {
 
       const chatMsg = {
         id: generateId('msg'),
+        gameNumber: room.gameNumber || 1,
+        scenarioId: room.scenario ? room.scenario.id : null,
         senderId: participant.id,
         senderNickname: participant.nickname,
         targetId,
@@ -2194,6 +2229,11 @@ const server = http.createServer(async (req, res) => {
       }
 
       // 다시 플레이 시 기존 판에서 나온 대표 사건들을 제외하고 완전히 새로운 동적 시나리오·시세·사건을 생성
+      // 이전 판 채팅은 유지하되, 새 판 번호(gameNumber)를 올려 이전 판 대화와 현재 판 대화를 구분
+      for (const m of room.chats) {
+        if (!m.gameNumber) m.gameNumber = room.gameNumber || 1;
+      }
+      room.gameNumber = (room.gameNumber || 1) + 1;
       const prevSignatures = room.playedEventSignatures || [];
       const newScenario = buildScenarioForRoom({
         excludedSignatures: prevSignatures,
@@ -2264,4 +2304,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, rooms };
+module.exports = { server, rooms, calculateArticlePrice };

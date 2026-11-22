@@ -28,6 +28,29 @@ const ALL_COMPANY_NAMES = [
 ];
 
 /**
+ * 내장 기사와 외부 AI 기사 생성 경로에 공통 적용하는 금지 표현 규칙
+ * - 미래 상승·하락 여부 단정, 확정/예상 등락률, 제목만 보고 결과를 추정하기 쉬운 표현 차단
+ */
+const FORBIDDEN_PREDICTIVE_PATTERNS = [
+  { code: 'FUTURE_RETURN_RATE_LEAK', regex: /[+-]\s*\d+(\.\d+)?\s*%/ },
+  { code: 'FUTURE_RETURN_RATE_LEAK', regex: /900\s*%/ },
+  { code: 'PREDICTIVE_DIRECTION_LEAK', regex: /(급등|급락|폭등|폭락)\s*(기대|전망|예상|우려|가능성|예고)?/ },
+  { code: 'PREDICTIVE_DIRECTION_LEAK', regex: /(주가|시세)\s*(상승|하락|강세|약세|반등|조정)/ },
+  { code: 'PREDICTIVE_DIRECTION_LEAK', regex: /(상승|하락)\s*(전망|기대|예상|확정|유력|우려)/ },
+  { code: 'PREDICTIVE_DIRECTION_LEAK', regex: /(수익성|영업이익)\s*(급감|급증|폭증)/ }
+];
+
+function checkPredictiveExpressionLeak(text) {
+  const target = String(text || '');
+  for (const rule of FORBIDDEN_PREDICTIVE_PATTERNS) {
+    if (rule.regex.test(target)) {
+      return rule.code;
+    }
+  }
+  return null;
+}
+
+/**
  * 2단계: AI에 넘기는 구조화된 사실 입력(Fact Brief) 생성
  * 미래 가격이나 미공개 결말은 제외하고 해당 연도에 공개 가능한 사실과 단서만 추출합니다.
  */
@@ -73,13 +96,18 @@ async function generateArticleManuscript(brief, fallbackArticle) {
     const timer = setTimeout(() => controller.abort(), 2500);
     try {
       const prompt = [
-        `발행 연도: ${brief.year}년 / 구분: ${brief.articleType} / 업종: ${brief.allowedIndustry}`,
+        `발행 연도: ${brief.year}년 / 구분: ${brief.articleType} / 단서 유형: ${brief.clueType} / 업종: ${brief.allowedIndustry}`,
         brief.allowedCompanyName
           ? `공개 가능 회사명: ${brief.allowedCompanyName}`
           : '주의: 특정 회사명(A바이오, B바이오 등)을 절대 언급하지 말고 업종명으로만 작성할 것.',
         `공개 사실: ${brief.disclosedFacts.join(' / ')}`,
         `기사 목적 및 단서: ${brief.questionOrClue}`,
-        '요구사항: 한국어 경제 뉴스 제목(1줄)과 본문(2~4문장)을 JSON {"title":"...","body":"..."} 형식으로 작성하라.'
+        '작성 기준:',
+        '1) 제목에는 사건의 주제와 확인된 사실만 쓰고, 급등 기대·하락 전망·예상 등락률처럼 결과를 추정하기 쉬운 표현을 쓰지 말 것.',
+        '2) 본문은 짧은 문단 2~3개(\\n\\n으로 구분)로 작성하되 배경, 새로 확인된 사실, 현재 남아 있는 조건을 담고 반복 설명을 줄일 것.',
+        '3) 미래의 상승·하락 여부, 확정 등락률(+/-%), 미공개 결말을 절대 직접 쓰지 말 것.',
+        '4) 일정 단서는 발표·심사·계약의 시점을, 사업 리스크 단서는 비용·보증·실패 조건을 중심으로 작성할 것.',
+        '출력 형식: JSON {"title":"...","body":"문단1\\n\\n문단2\\n\\n문단3"}'
       ].join('\n');
 
       const res = await fetch(process.env.AI_ARTICLE_API_URL, {
@@ -113,81 +141,62 @@ async function generateArticleManuscript(brief, fallbackArticle) {
 }
 
 /**
- * 공개 사실(disclosedFacts)과 단서(questionOrClue)만을 조합해 2~4문장의 자연스러운 한국어 기사를 동적으로 구성합니다.
- * 판마다 기사 문두·맥락 문장을 자연스럽게 변주하여 같은 사건 유형이라도 기사 문장이 매번 달라지도록 합니다.
+ * 공개 사실(disclosedFacts)과 단서(questionOrClue)만을 바탕으로 짧은 문단 2~3개 구조의 한국어 기사를 구성합니다.
+ * - 제목에는 확인된 주제와 사실만 남기고, 결과를 추정하기 쉬운 표현이나 불필요한 수식어를 붙이지 않습니다.
+ * - 반복 맺음말을 덧붙이지 않고 배경·확인된 사실·남아 있는 조건이 드러나는 문단 구조를 유지합니다.
  */
 function composeStructuredKoreanNews(brief, fallbackArticle) {
-  const baseTitle = brief.articleType === '무료'
-    ? fallbackArticle.title
-    : fallbackArticle.postTitle;
-  const baseBody = fallbackArticle.body;
+  const baseTitle = String(
+    brief.articleType === '무료'
+      ? fallbackArticle.title
+      : fallbackArticle.postTitle
+  ).trim();
+  const rawBody = String(fallbackArticle.body || '').trim();
 
-  // 무료 기사 제목을 깔끔하게 유지하되 업종명이 제목에 이미 포함된 경우 중복 접두어를 붙이지 않음
-  const hasIndInTitle = baseTitle.includes(brief.allowedIndustry);
-  const freeTitleTemplates = [
-    (t) => t,
-    (t) => (hasIndInTitle ? t : `[${brief.allowedIndustry}] ${t}`),
-    (t) => `${t}… 시장 관심 집중`
-  ];
-
-  const paidClosingVariants = [
-    '이번 조사 결과는 차기 개장 시점의 실적과 주가 방향에 직접적인 영향을 줄 것으로 분석된다.',
-    '시장에서는 해당 경영 현안이 내년 개장 평가액에 곧바로 반영될 것으로 보고 있다.',
-    '향후 개장 시점에 해당 단서가 실제 실적에 어떻게 반영되는지 주시할 필요가 있다.'
-  ];
-
-  const scheduleClosingVariants = [
-    '해당 심사 및 발표 시점이 차기 개장 주가 변동의 핵심 분기점이 될 전망이다.',
-    '단계별 진행 시점과 대금 정산 시기에 맞춰 실적 반영 시차가 결정될 것으로 보인다.'
-  ];
-
-  const riskClosingVariants = [
-    '해당 리스크 요인의 통제 여부가 향후 수익성과 협상 지속성을 좌우할 핵심 변수로 꼽힌다.',
-    '비용 부담과 조건 이견이 해소되지 않을 경우 계획이 차질을 빚을 가능성에 유의해야 한다.'
-  ];
-
-  const freeClosingVariants = [
-    '세부 계약 조건과 실제 수혜 기업은 유료 조사 단서와 향후 실적 발표를 통해 윤곽이 드러날 전망이다.',
-    '업체별 원가 반영 시점과 계약 성사 여부에 따라 다음 개장 주가 흐름이 엇갈릴 것으로 보인다.',
-    '업계에서는 기업별 비용 분담 구조와 일정 지연 여부를 면밀히 확인할 필요가 있다고 지적한다.'
-  ];
-
-  const pickedTitle = brief.articleType === '무료'
-    ? freeTitleTemplates[Math.floor(Math.random() * freeTitleTemplates.length)](baseTitle)
-    : baseTitle;
-
-  const sentences = baseBody
-    .split(/(?<=[.!?다요])\s+/)
-    .map((s) => s.trim())
+  // 문단(\n\n) 구분을 보존하면서 각 문단의 앞뒤 공백을 정리
+  let paragraphs = rawBody
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 
-  let finalSentences = [...sentences];
-  // 선택형 유료 단서(일정 단서 vs 사업 리스크 단서)는 이미 2문장 이상으로 서로 다른 사실만 담고 있으므로
-  // 공통 맺음말이 중복 부착되어 두 단서 본문이 겹치지 않도록 1문장 이하일 때만 유형 전용 맺음말을 보충합니다.
-  if (brief.hasChoicePair) {
-    if (finalSentences.length <= 1) {
-      const pool = brief.clueType === 'schedule' ? scheduleClosingVariants : riskClosingVariants;
-      finalSentences.push(pool[Math.floor(Math.random() * pool.length)]);
+  // 만약 단일 문단으로 들어온 경우 문장 단위로 2~3개 짧은 문단으로 자연스럽게 분리
+  if (paragraphs.length === 1) {
+    const sentences = paragraphs[0]
+      .split(/(?<=[.!?다요])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sentences.length >= 4) {
+      const mid = Math.ceil(sentences.length / 2);
+      paragraphs = [
+        sentences.slice(0, mid).join(' '),
+        sentences.slice(mid).join(' ')
+      ];
+    } else if (sentences.length >= 2) {
+      paragraphs = [
+        sentences[0],
+        sentences.slice(1).join(' ')
+      ];
     }
-  } else if (finalSentences.length <= 2) {
-    const closingPool = brief.articleType === '무료' ? freeClosingVariants : paidClosingVariants;
-    const extraSentence = closingPool[Math.floor(Math.random() * closingPool.length)];
-    finalSentences.push(extraSentence);
   }
-  if (finalSentences.length > 4) {
-    finalSentences = finalSentences.slice(0, 4);
+
+  if (paragraphs.length > 3) {
+    paragraphs = [
+      paragraphs[0],
+      paragraphs[1],
+      paragraphs.slice(2).join(' ')
+    ];
   }
 
   return {
-    title: pickedTitle,
-    body: finalSentences.join(' '),
+    title: baseTitle,
+    body: paragraphs.join('\n\n'),
     source: 'fact_composer'
   };
 }
 
 /**
- * 4단계: 생성된 기사 원고 검증기 (기획서 13쪽 4단계 "검증과 저장")
- * - 해당 연도, 공개 범위(숨긴 회사명 노출 금지), 문장 길이(2~4문장), 미공개 수치 누출 여부를 검사합니다.
+ * 4단계: 생성된 기사 원고 검증기 (내장 기사·외부 AI 기사 공통 적용)
+ * - 해당 연도, 공개 범위(숨긴 회사명 노출 금지), 짧은 문단 2~3개 구조, 미래 상승·하락 및 확정 등락률 누출 여부를 검사합니다.
  * - 잘못된 생성물은 false를 반환하여 예비 기사(fallback)로 즉시 교체되게 합니다.
  */
 function validateGeneratedArticle(manuscript, brief) {
@@ -211,7 +220,7 @@ function validateGeneratedArticle(manuscript, brief) {
     }
   }
 
-  // 2. 유료 기사에 허용된 대상 회사명이 있을 때 다른 경쟁 회사명이 잘못 들어갔는지 검사
+  // 2. 유료 기사에 허용된 대상 회사명이 있을 때 대상 회사명이 포함되었는지 검사
   if (!brief.hideCompanyName && brief.allowedCompanyName) {
     const normalizedAllowed = brief.allowedCompanyName.replace(/\s+/g, '');
     const normalizedText = `${title} ${body}`.replace(/\s+/g, '');
@@ -220,10 +229,11 @@ function validateGeneratedArticle(manuscript, brief) {
     }
   }
 
-  // 3. 미래 확정 등락률 및 미공개 결말 조기 노출 금지 검사
+  // 3. 미래 상승·하락 여부, 확정/예상 등락률, 결과 추정 표현 금지 검사 (제목·본문 공통)
   const combinedText = `${title} ${body}`;
-  if (/[+-]\s*\d+(\.\d+)?\s*%/.test(combinedText) || /900\s*%/.test(combinedText)) {
-    return { valid: false, reason: 'FUTURE_RETURN_RATE_LEAK' };
+  const leakCode = checkPredictiveExpressionLeak(combinedText);
+  if (leakCode) {
+    return { valid: false, reason: leakCode };
   }
 
   // 4. 필수 키워드/수치 포함 여부 검사 (예: "70%" 등 지정된 수치)
@@ -235,12 +245,20 @@ function validateGeneratedArticle(manuscript, brief) {
     }
   }
 
-  // 4. 본문 문장 수 검사 (기획서 13쪽: 예시 범위는 본문 2~4문장)
+  // 5. 본문 문단 및 문장 수 검사 (짧은 문단 2~3개 권장, 전체 문장 2~10문장 허용)
+  const paragraphs = body
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length < 1 || paragraphs.length > 4) {
+    return { valid: false, reason: `INVALID_PARAGRAPH_COUNT:${paragraphs.length}` };
+  }
   const sentenceCount = body
+    .replace(/\n+/g, ' ')
     .split(/[.!?]+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 1).length;
-  if (sentenceCount < 1 || sentenceCount > 6) {
+  if (sentenceCount < 1 || sentenceCount > 12) {
     return { valid: false, reason: `INVALID_SENTENCE_COUNT:${sentenceCount}` };
   }
 
@@ -332,6 +350,7 @@ module.exports = {
   buildArticleFactBrief,
   generateArticleManuscript,
   validateGeneratedArticle,
+  checkPredictiveExpressionLeak,
   prepareArticlesForYear,
   prewarmScenarioArticles
 };

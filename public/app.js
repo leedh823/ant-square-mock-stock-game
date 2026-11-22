@@ -8,6 +8,8 @@
 
   const SESSION_STORAGE_KEY = 'ant_square_session_v1';
   const PLAYED_SCENARIOS_KEY = 'ant_square_played_scenarios_v1';
+  const BGM_STORAGE_KEY = 'ant_square_bgm_enabled_v1';
+  const WARNING_15S_STORAGE_KEY = 'ant_square_warned_15s_rounds_v1';
 
   // 서버 상태 및 UI 로컬 상태
   let appState = null;
@@ -15,6 +17,107 @@
   let eventSource = null;
   let isConnected = true;
   let serverClockOffset = 0;
+
+  // BGM 싱글턴 오디오 인스턴스 (화면 전환 및 다시 플레이 시 겹쳐 재생 방지)
+  let bgmAudio = null;
+  let bgmAutoplayResumeBound = false;
+  let warning15SecHideTimer = null;
+
+  function loadWarned15SecRoundKeys() {
+    try {
+      const raw = sessionStorage.getItem(WARNING_15S_STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function persistWarned15SecRoundKeys(setObj) {
+    try {
+      const arr = Array.from(setObj).slice(-40);
+      sessionStorage.setItem(WARNING_15S_STORAGE_KEY, JSON.stringify(arr));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function ensureBgmAudio() {
+    if (!bgmAudio) {
+      bgmAudio = new Audio('/audio/bgm-ambient.wav');
+      bgmAudio.loop = true;
+      bgmAudio.volume = 0.14; // 기사 읽기와 거래에 방해되지 않는 낮은 볼륨
+      bgmAudio.preload = 'auto';
+    }
+    return bgmAudio;
+  }
+
+  function syncBgmToggleUI() {
+    const btn = $('btn-bgm-toggle');
+    const icon = $('bgm-toggle-icon');
+    const label = $('bgm-toggle-label');
+    if (!btn) return;
+    const isOn = Boolean(uiState.bgmEnabled);
+    btn.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+    btn.classList.toggle('is-on', isOn);
+    if (icon) icon.textContent = isOn ? '🔊' : '🔇';
+    if (label) label.textContent = isOn ? 'BGM 켜짐' : 'BGM 꺼짐';
+  }
+
+  function bindOneTimeBgmResume() {
+    if (bgmAutoplayResumeBound) return;
+    bgmAutoplayResumeBound = true;
+    const resume = () => {
+      bgmAutoplayResumeBound = false;
+      window.removeEventListener('pointerdown', resume);
+      window.removeEventListener('keydown', resume);
+      if (uiState.bgmEnabled) {
+        const audio = ensureBgmAudio();
+        if (audio.paused) {
+          audio.play().catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('pointerdown', resume, { once: true });
+    window.addEventListener('keydown', resume, { once: true });
+  }
+
+  function setBgmEnabled(enabled, { persist = true } = {}) {
+    uiState.bgmEnabled = Boolean(enabled);
+    if (persist) {
+      try {
+        localStorage.setItem(BGM_STORAGE_KEY, uiState.bgmEnabled ? 'true' : 'false');
+      } catch (e) {
+        // ignore
+      }
+    }
+    syncBgmToggleUI();
+
+    if (uiState.bgmEnabled) {
+      const audio = ensureBgmAudio();
+      if (audio.paused) {
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            // 브라우저 자동재생 정책으로 차단된 경우 첫 사용자 상호작용 시 1회 재개
+            bindOneTimeBgmResume();
+          });
+        }
+      }
+    } else if (bgmAudio && !bgmAudio.paused) {
+      bgmAudio.pause();
+    }
+  }
+
+  function initBgm() {
+    let savedEnabled = false;
+    try {
+      savedEnabled = localStorage.getItem(BGM_STORAGE_KEY) === 'true';
+    } catch (e) {
+      savedEnabled = false;
+    }
+    setBgmEnabled(savedEnabled, { persist: false });
+  }
 
   const uiState = {
     entryMode: 'friend',          // 'friend' | 'solo'
@@ -36,18 +139,89 @@
     showAllYearsInArticles: true, // 보관함에서 전 연도 모아보기 여부
     articleFilter: 'ALL',         // 보관함 필터: 'ALL' | 'OWNED' | 'ARC' | '바이오' | '반도체' | '조선' | '엔터' | 'OTHER'
     selectedArchiveArticleId: null, // 보관함에서 읽던 기사 ID
-    articleScrollTopByNav: {      // 같은 연도 내 탭 이동 시 목록 스크롤 위치 복원
+    articleScrollTopByNav: {      // 같은 연도 내 탭 이동 시 PC 목록 요소(#article-list-ul) 스크롤 위치 복원
       current_free: 0,
       paid_clues: 0,
       archive: 0
     },
+    articlePageScrollYByNav: {    // 같은 연도 내 탭 이동 시 모바일/페이지 목록 영역(window.scrollY) 스크롤 위치 복원
+      current_free: 0,
+      paid_clues: 0,
+      archive: 0
+    },
+    articleReaderPageScrollYByNav: { // 같은 연도 내 모바일 기사 본문 영역(window.scrollY) 스크롤 위치 복원
+      current_free: 0,
+      paid_clues: 0,
+      archive: 0
+    },
+    pendingArticleScrollRestore: false, // 기사 탭/네비게이션/본문↔목록 전환 시 스크롤 복원 대기 여부
     cameFromArticles: false,      // 기사 본문의 '관련 종목 보기'에서 시장으로 이동했는지 여부
     selectedChatTargetId: null,   // null = 전체 방, participantId = 1:1 대화
+    showPreviousGameChats: false, // '이전 판 대화' 펼침 여부 (새 판 시작 시 기본 접힘)
+    lastRoomGameNumber: 1,        // 현재 방의 판 번호 추적
+    readChatIds: new Set(),       // 현재 세션에서 읽음 처리된 채팅 메시지 ID 집합
+    warned15SecRoundKeys: loadWarned15SecRoundKeys(), // 15초 경고가 이미 표시된 거래 라운드 키
+    warning15SecTriggerCountByRound: {}, // 라운드별 15초 경고 트리거 횟수 (검증 및 중복 방지 확인용)
+    bgmEnabled: false,            // BGM 켜짐 여부 (첫 방문은 항상 꺼짐)
     inspectingMarketDuringOpening: false, // 개장 결과 중 시장·내 투자 확인 모드
     isSubmittingOrder: false,
     isBuyingArticle: false,
     isEntrySubmitting: false
   };
+
+  let isRenderingArticles = false;
+
+  function getPageScrollY() {
+    return Math.max(0, Math.round(window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0));
+  }
+
+  function isMobileViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
+  function isMobileReaderDrilldown() {
+    return isMobileViewport() && Boolean(uiState.mobileShowReader);
+  }
+
+  function isArticlesPanelActiveAndVisible() {
+    const tradingScreen = $('screen-trading');
+    const articlesPanel = $('tab-panel-articles');
+    return Boolean(
+      uiState.activeTab === 'articles' &&
+      tradingScreen &&
+      !tradingScreen.classList.contains('hidden') &&
+      articlesPanel &&
+      !articlesPanel.classList.contains('hidden')
+    );
+  }
+
+  function saveCurrentArticleScrollState(navKey = uiState.articleNav) {
+    if (!navKey || isRenderingArticles || !isArticlesPanelActiveAndVisible()) return;
+    const listUl = $('article-list-ul');
+    if (listUl && listUl.offsetParent !== null) {
+      uiState.articleScrollTopByNav[navKey] = listUl.scrollTop;
+    }
+    if (isMobileReaderDrilldown()) {
+      uiState.articleReaderPageScrollYByNav[navKey] = getPageScrollY();
+    } else {
+      uiState.articlePageScrollYByNav[navKey] = getPageScrollY();
+    }
+  }
+
+  function restoreArticleScrollState(navKey = uiState.articleNav) {
+    if (!navKey) return;
+    const listUl = $('article-list-ul');
+    if (listUl && listUl.offsetParent !== null) {
+      listUl.scrollTop = uiState.articleScrollTopByNav[navKey] || 0;
+    }
+    if (isArticlesPanelActiveAndVisible() && (uiState.pendingArticleScrollRestore || isMobileViewport())) {
+      uiState.pendingArticleScrollRestore = false;
+      const targetY = isMobileReaderDrilldown()
+        ? (uiState.articleReaderPageScrollYByNav[navKey] || 0)
+        : (uiState.articlePageScrollYByNav[navKey] || 0);
+      window.scrollTo(0, targetY);
+    }
+  }
 
   /**
    * 종목별 추리 태그 정의 (숨겨진 회사 후보 표시 및 호재/악재 추리 메모)
@@ -320,6 +494,12 @@
       serverClockOffset = newState.serverNow - Date.now();
     }
 
+    const currentGameNumber = (newState.room && newState.room.gameNumber) || 1;
+    if (uiState.lastRoomGameNumber !== currentGameNumber) {
+      uiState.lastRoomGameNumber = currentGameNumber;
+      uiState.showPreviousGameChats = false;
+    }
+
     // 새 연도 거래 시작 시 '올해 기사'를 기본 화면으로 초기화하고, 같은 연도 내에서는 읽던 기사와 목록 위치를 유지
     if (prevYear !== newState.room.currentYear || prevStatus !== newState.room.status) {
       if (newState.room.status === 'TRADING') {
@@ -339,6 +519,17 @@
             paid_clues: 0,
             archive: 0
           };
+          uiState.articlePageScrollYByNav = {
+            current_free: 0,
+            paid_clues: 0,
+            archive: 0
+          };
+          uiState.articleReaderPageScrollYByNav = {
+            current_free: 0,
+            paid_clues: 0,
+            archive: 0
+          };
+          uiState.pendingArticleScrollRestore = true;
         }
       }
       if (newState.room.status === 'OPENING') {
@@ -855,7 +1046,6 @@
               </div>
               <div class="tl-card-title">${escapeHtml(pArt.postTitle)}</div>
               <div class="tl-card-body">${escapeHtml(pArt.body)}</div>
-              ${pArt.highlightNote ? `<div style="font-size:12px;color:#4fe3b5;font-weight:700;margin-top:2px;">→ ${escapeHtml(pArt.highlightNote)}</div>` : ''}
             </div>
           `;
         } else if (pArt.lockedBySibling) {
@@ -1072,10 +1262,7 @@
    */
   function navigateToRelatedStock(stockId) {
     if (!stockId) return;
-    const listUl = $('article-list-ul');
-    if (listUl) {
-      uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
-    }
+    saveCurrentArticleScrollState(uiState.articleNav);
     if (uiState.selectedStockId !== stockId) {
       resetOrderQuantityToOne();
     }
@@ -1096,16 +1283,22 @@
   function renderArticlesTab() {
     if (!appState) return;
     const { room, me, stocks, articlesByYear } = appState;
-    const articlesGrid = document.querySelector('.articles-grid');
-    if (articlesGrid) {
-      articlesGrid.classList.toggle('mobile-show-reader', uiState.mobileShowReader);
-    }
-
-    // 내부 탐색 탭 활성화 상태 동기화
     const nav = uiState.articleNav || 'current_free';
-    $('btn-art-nav-current').classList.toggle('active', nav === 'current_free');
-    $('btn-art-nav-paid').classList.toggle('active', nav === 'paid_clues');
-    $('btn-art-nav-archive').classList.toggle('active', nav === 'archive');
+    if (!uiState.pendingArticleScrollRestore) {
+      saveCurrentArticleScrollState(nav);
+    }
+    isRenderingArticles = true;
+
+    try {
+      const articlesGrid = document.querySelector('.articles-grid');
+      if (articlesGrid) {
+        articlesGrid.classList.toggle('mobile-show-reader', uiState.mobileShowReader);
+      }
+
+      // 내부 탐색 탭 활성화 상태 동기화
+      $('btn-art-nav-current').classList.toggle('active', nav === 'current_free');
+      $('btn-art-nav-paid').classList.toggle('active', nav === 'paid_clues');
+      $('btn-art-nav-archive').classList.toggle('active', nav === 'archive');
 
     // 보관함 전용 컨트롤은 보관함 탭에서만 표시
     $('articles-archive-controls').classList.toggle('hidden', nav !== 'archive');
@@ -1211,15 +1404,16 @@
         `;
 
         li.addEventListener('click', () => {
-          uiState.articleScrollTopByNav.current_free = listUl.scrollTop;
+          saveCurrentArticleScrollState('current_free');
           uiState.selectedFreeArticleId = art.id;
           uiState.mobileShowReader = true;
+          uiState.articleReaderPageScrollYByNav.current_free = 0;
+          uiState.pendingArticleScrollRestore = true;
           renderArticlesTab();
         });
         listUl.appendChild(li);
       });
 
-      listUl.scrollTop = uiState.articleScrollTopByNav.current_free || 0;
       const selectedFree = currentFreeList.find((a) => a.id === uiState.selectedFreeArticleId) || currentFreeList[0] || null;
       renderFreeArticleReader(selectedFree);
       return;
@@ -1328,7 +1522,7 @@
         `;
 
         li.addEventListener('click', () => {
-          uiState.articleScrollTopByNav.paid_clues = listUl.scrollTop;
+          saveCurrentArticleScrollState('paid_clues');
           uiState.selectedPaidStockId = stock.id;
           if (purchasedClue) {
             uiState.selectedPaidArticleId = purchasedClue.id;
@@ -1336,13 +1530,14 @@
             uiState.selectedPaidArticleId = stockClues[0].id;
           }
           uiState.mobileShowReader = true;
+          uiState.articleReaderPageScrollYByNav.paid_clues = 0;
+          uiState.pendingArticleScrollRestore = true;
           renderArticlesTab();
         });
 
         listUl.appendChild(li);
       }
 
-      listUl.scrollTop = uiState.articleScrollTopByNav.paid_clues || 0;
       const activeStock = stocks.find((s) => s.id === uiState.selectedPaidStockId) || stocks[0];
       const activeStockClues = currentPaidList.filter((p) => p.stockId === (activeStock && activeStock.id));
       renderPaidStockClueReader(activeStock, activeStockClues);
@@ -1385,6 +1580,9 @@
     allBtn.addEventListener('click', () => {
       uiState.showAllYearsInArticles = true;
       uiState.selectedArchiveArticleId = null;
+      uiState.articleScrollTopByNav.archive = 0;
+      uiState.articlePageScrollYByNav.archive = 0;
+      uiState.pendingArticleScrollRestore = true;
       renderArticlesTab();
     });
     yearTabsEl.appendChild(allBtn);
@@ -1398,6 +1596,9 @@
         uiState.showAllYearsInArticles = false;
         uiState.selectedArticleYear = y;
         uiState.selectedArchiveArticleId = null;
+        uiState.articleScrollTopByNav.archive = 0;
+        uiState.articlePageScrollYByNav.archive = 0;
+        uiState.pendingArticleScrollRestore = true;
         renderArticlesTab();
       });
       yearTabsEl.appendChild(btn);
@@ -1468,16 +1669,17 @@
       }
 
       li.addEventListener('click', () => {
-        uiState.articleScrollTopByNav.archive = listUl.scrollTop;
+        saveCurrentArticleScrollState('archive');
         uiState.selectedArchiveArticleId = art.id;
         uiState.mobileShowReader = true;
+        uiState.articleReaderPageScrollYByNav.archive = 0;
+        uiState.pendingArticleScrollRestore = true;
         renderArticlesTab();
       });
 
       listUl.appendChild(li);
     }
 
-    listUl.scrollTop = uiState.articleScrollTopByNav.archive || 0;
     const selectedArch = filteredArchive.find((a) => a.id === uiState.selectedArchiveArticleId) || filteredArchive[0];
     if (selectedArch.type === 'free') {
       renderFreeArticleReader(selectedArch);
@@ -1485,6 +1687,21 @@
       const stockObj = stocks.find((s) => s.id === selectedArch.stockId) || { id: selectedArch.stockId, name: selectedArch.stockName, industry: selectedArch.industry };
       renderPaidStockClueReader(stockObj, [selectedArch], true);
     }
+    } finally {
+      restoreArticleScrollState(nav);
+      isRenderingArticles = false;
+    }
+  }
+
+  function renderArticleBodyParagraphsHtml(bodyText) {
+    const paragraphs = String(bodyText || '')
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (paragraphs.length === 0) return '';
+    return paragraphs
+      .map((p) => `<p class="reader-body-p">${escapeHtml(p)}</p>`)
+      .join('');
   }
 
   /**
@@ -1536,7 +1753,7 @@
           <span class="reader-meta-text">${article.year}년 무료 기사${article.arcStageLabel ? ` · ${escapeHtml(article.arcStageLabel)}` : ''}</span>
         </div>
         <h3 class="reader-headline">${escapeHtml(article.title)}</h3>
-        <p class="reader-body-p">${escapeHtml(article.body)}</p>
+        <div class="reader-body-paragraphs">${renderArticleBodyParagraphsHtml(article.body)}</div>
         ${
           isHiddenCompany
             ? `<div class="reader-highlight-box">대상 회사명이 비공개인 ${escapeHtml(article.industry)} 업종 기사입니다. 특정 종목과 바로 연결되지 않으며, [유료 단서] 탭에서 종목별 단서를 조사해 실제 당사자를 추리할 수 있습니다.</div>`
@@ -1656,8 +1873,7 @@
           <span class="reader-owned-pill">구매 완료 · ${formatWon(activeClue.price)}</span>
         </div>
         <h3 class="reader-headline">${escapeHtml(activeClue.postTitle)}</h3>
-        <p class="reader-body-p">${escapeHtml(activeClue.body)}</p>
-        ${activeClue.highlightNote ? `<div class="reader-highlight-box">${escapeHtml(activeClue.highlightNote)}</div>` : ''}
+        <div class="reader-body-paragraphs">${renderArticleBodyParagraphsHtml(activeClue.body)}</div>
         <div id="reader-quick-deduction-slot"></div>
       `;
     } else if (activeClue.lockedBySibling) {
@@ -1856,12 +2072,123 @@
     slot.appendChild(box);
   }
 
+  function isChatPanelVisible() {
+    const tradingScreen = $('screen-trading');
+    const chatPanel = $('tab-panel-chat');
+    return Boolean(
+      uiState.activeTab === 'chat' &&
+      tradingScreen &&
+      !tradingScreen.classList.contains('hidden') &&
+      chatPanel &&
+      !chatPanel.classList.contains('hidden')
+    );
+  }
+
+  /**
+   * 현재 열려 있는 채팅 채널(전체 방 또는 특정 1:1 대화)의 현재 판 메시지만 읽음 처리
+   */
+  function markActiveChatChannelAsRead() {
+    if (!appState || !isChatPanelVisible()) return;
+    const { room, me, chats } = appState;
+    const currentGameNumber = (room && room.gameNumber) || 1;
+    const isAllChannel = uiState.selectedChatTargetId === null;
+
+    for (const m of chats || []) {
+      if ((m.gameNumber || 1) !== currentGameNumber) continue;
+      if (isAllChannel) {
+        if (m.targetId === null) {
+          uiState.readChatIds.add(m.id);
+        }
+      } else {
+        const isTargetPair =
+          (m.senderId === me.id && m.targetId === uiState.selectedChatTargetId) ||
+          (m.senderId === uiState.selectedChatTargetId && m.targetId === me.id);
+        if (isTargetPair) {
+          uiState.readChatIds.add(m.id);
+        }
+      }
+    }
+  }
+
+  /**
+   * 읽지 않은 채팅 메시지 수 계산
+   * - 내가 보낸 메시지(m.senderId === me.id)는 포함하지 않음
+   * - 이전 판 메시지는 포함하지 않음
+   * - 1:1 메시지는 서버에서 당사자에게만 전달되므로 상대방에게만 알림이 집계됨
+   */
+  function computeUnreadChatCounts() {
+    if (!appState) {
+      return { totalUnread: 0, allUnread: 0, dmUnreadByPartner: {} };
+    }
+    const { room, me, chats } = appState;
+    const currentGameNumber = (room && room.gameNumber) || 1;
+    let allUnread = 0;
+    const dmUnreadByPartner = {};
+
+    for (const m of chats || []) {
+      if ((m.gameNumber || 1) !== currentGameNumber) continue;
+      if (m.senderId === me.id) continue;
+      if (uiState.readChatIds.has(m.id)) continue;
+
+      if (m.targetId === null) {
+        allUnread++;
+      } else if (m.targetId === me.id) {
+        dmUnreadByPartner[m.senderId] = (dmUnreadByPartner[m.senderId] || 0) + 1;
+      }
+    }
+
+    const dmTotal = Object.values(dmUnreadByPartner).reduce((sum, n) => sum + n, 0);
+    return {
+      totalUnread: allUnread + dmTotal,
+      allUnread,
+      dmUnreadByPartner
+    };
+  }
+
+  function updateChatUnreadBadges() {
+    markActiveChatChannelAsRead();
+    const { totalUnread, allUnread, dmUnreadByPartner } = computeUnreadChatCounts();
+
+    const pcBadge = $('tab-chat-badge');
+    if (pcBadge) {
+      if (totalUnread > 0) {
+        pcBadge.textContent = totalUnread > 99 ? '99+' : String(totalUnread);
+        pcBadge.classList.remove('hidden');
+      } else {
+        pcBadge.classList.add('hidden');
+      }
+    }
+
+    const mobileBadge = $('mobile-tab-chat-badge');
+    if (mobileBadge) {
+      if (totalUnread > 0) {
+        mobileBadge.textContent = totalUnread > 99 ? '99+' : String(totalUnread);
+        mobileBadge.classList.remove('hidden');
+      } else {
+        mobileBadge.classList.add('hidden');
+      }
+    }
+
+    const allBadge = $('chat-all-unread-badge');
+    if (allBadge) {
+      if (allUnread > 0) {
+        allBadge.textContent = allUnread > 99 ? '99+' : String(allUnread);
+        allBadge.classList.remove('hidden');
+      } else {
+        allBadge.classList.add('hidden');
+      }
+    }
+
+    return { totalUnread, allUnread, dmUnreadByPartner };
+  }
+
   /**
    * 08 & 09. 채팅 탭 렌더링 (전체 방 + 1:1 대화, 기획서 17쪽)
    */
   function renderChatTab() {
     if (!appState) return;
     const { me, participants, chats } = appState;
+    const { dmUnreadByPartner } = updateChatUnreadBadges();
 
     const isAllChannel = uiState.selectedChatTargetId === null;
     $('btn-chat-channel-all').classList.toggle('active', isAllChannel);
@@ -1877,10 +2204,18 @@
         const li = document.createElement('li');
         const isActive = uiState.selectedChatTargetId === p.id;
         li.className = `chat-dm-item${isActive ? ' active' : ''}`;
+        li.dataset.dmPartnerId = p.id;
         const badgeClass = ` alt-${(idx % 3) + 1}`;
+        const unreadCount = dmUnreadByPartner[p.id] || 0;
+        const unreadBadgeHtml = unreadCount > 0
+          ? `<span class="chat-unread-badge chat-dm-unread-badge">${unreadCount > 99 ? '99+' : unreadCount}</span>`
+          : '';
         li.innerHTML = `
-          <span class="avatar-badge${badgeClass}">${escapeHtml(p.nickname.charAt(0))}</span>
-          <span style="font-weight:700;font-size:13.5px;">${escapeHtml(p.nickname)}</span>
+          <div class="chat-dm-item-left">
+            <span class="avatar-badge${badgeClass}">${escapeHtml(p.nickname.charAt(0))}</span>
+            <span style="font-weight:700;font-size:13.5px;">${escapeHtml(p.nickname)}</span>
+          </div>
+          ${unreadBadgeHtml}
         `;
         li.addEventListener('click', () => {
           uiState.selectedChatTargetId = p.id;
@@ -1902,6 +2237,7 @@
     }
 
     const msgBox = $('chat-messages-box');
+    const currentGameNumber = (appState.room && appState.room.gameNumber) || 1;
     const filteredMsgs = (chats || []).filter((m) => {
       if (isAllChannel) return m.targetId === null;
       return (
@@ -1910,24 +2246,77 @@
       );
     });
 
+    const previousMsgs = filteredMsgs.filter((m) => (m.gameNumber || 1) < currentGameNumber);
+    const currentMsgs = filteredMsgs.filter((m) => (m.gameNumber || 1) === currentGameNumber);
+
     msgBox.innerHTML = '';
-    if (filteredMsgs.length === 0) {
-      msgBox.innerHTML = `
-        <div style="color:#657f8f;font-size:13px;margin:auto;text-align:center;">
+
+    // 이전 판 대화가 있는 경우 상단에 펼쳐볼 수 있는 '이전 판 대화' 영역 제공
+    if (previousMsgs.length > 0) {
+      const prevSection = document.createElement('div');
+      prevSection.className = 'prev-game-chat-section';
+      prevSection.innerHTML = `
+        <button
+          type="button"
+          id="btn-toggle-prev-game-chats"
+          class="btn-prev-game-chat-toggle"
+          aria-expanded="${uiState.showPreviousGameChats ? 'true' : 'false'}"
+        >
+          <span>이전 판 대화 (${previousMsgs.length}건)</span>
+          <span class="prev-chat-toggle-label">${uiState.showPreviousGameChats ? '접기 ▲' : '펼쳐보기 ▼'}</span>
+        </button>
+        <div id="prev-game-chat-list" class="prev-game-chat-list${uiState.showPreviousGameChats ? '' : ' hidden'}"></div>
+      `;
+      msgBox.appendChild(prevSection);
+
+      const toggleBtn = prevSection.querySelector('#btn-toggle-prev-game-chats');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          uiState.showPreviousGameChats = !uiState.showPreviousGameChats;
+          renderChatTab();
+        });
+      }
+
+      const prevListEl = prevSection.querySelector('#prev-game-chat-list');
+      if (prevListEl && uiState.showPreviousGameChats) {
+        for (const m of previousMsgs) {
+          const isMine = m.senderId === me.id;
+          const row = document.createElement('div');
+          row.className = `chat-msg-row prev-game-msg ${isMine ? 'mine' : 'others'}`;
+          const gameNum = m.gameNumber || 1;
+          row.innerHTML = `
+            <span class="chat-sender-name">${escapeHtml(m.senderNickname)} <span class="chat-game-tag">${gameNum}번째 판 · ${m.year}년</span></span>
+            <div class="chat-bubble">${escapeHtml(m.text)}</div>
+          `;
+          prevListEl.appendChild(row);
+        }
+      }
+    }
+
+    // 현재 판 대화 (새 판에서는 현재 판 대화를 기본으로 표시)
+    const currentListWrap = document.createElement('div');
+    currentListWrap.id = 'current-game-chat-list';
+    currentListWrap.className = 'current-game-chat-list';
+
+    if (currentMsgs.length === 0) {
+      currentListWrap.innerHTML = `
+        <div class="chat-current-empty" style="color:#657f8f;font-size:13px;margin:auto;text-align:center;padding:24px 12px;">
           ${isAllChannel ? '전체 방 대화를 시작해 보세요.' : '1:1 비밀 대화를 시작해 보세요. 둘만 볼 수 있어요.'}
         </div>
       `;
+      msgBox.appendChild(currentListWrap);
     } else {
-      for (const m of filteredMsgs) {
+      for (const m of currentMsgs) {
         const isMine = m.senderId === me.id;
         const row = document.createElement('div');
-        row.className = `chat-msg-row ${isMine ? 'mine' : 'others'}`;
+        row.className = `chat-msg-row current-game-msg ${isMine ? 'mine' : 'others'}`;
         row.innerHTML = `
           <span class="chat-sender-name">${escapeHtml(m.senderNickname)}</span>
           <div class="chat-bubble">${escapeHtml(m.text)}</div>
         `;
-        msgBox.appendChild(row);
+        currentListWrap.appendChild(row);
       }
+      msgBox.appendChild(currentListWrap);
       msgBox.scrollTop = msgBox.scrollHeight;
     }
   }
@@ -2367,6 +2756,36 @@
     `;
   }
 
+  function hide15SecWarningBanner() {
+    if (warning15SecHideTimer) {
+      clearTimeout(warning15SecHideTimer);
+      warning15SecHideTimer = null;
+    }
+    const banner = $('trading-15s-warning-banner');
+    if (banner) {
+      banner.classList.add('hidden');
+    }
+  }
+
+  function trigger15SecWarningOnceForRound(roundKey) {
+    if (!roundKey || uiState.warned15SecRoundKeys.has(roundKey)) return;
+    uiState.warned15SecRoundKeys.add(roundKey);
+    persistWarned15SecRoundKeys(uiState.warned15SecRoundKeys);
+    uiState.warning15SecTriggerCountByRound[roundKey] =
+      (uiState.warning15SecTriggerCountByRound[roundKey] || 0) + 1;
+
+    const banner = $('trading-15s-warning-banner');
+    if (banner) {
+      banner.textContent = '거래 마감까지 30초 남았어요';
+      banner.classList.remove('hidden');
+      if (warning15SecHideTimer) clearTimeout(warning15SecHideTimer);
+      warning15SecHideTimer = setTimeout(() => {
+        banner.classList.add('hidden');
+        warning15SecHideTimer = null;
+      }, 5000);
+    }
+  }
+
   /**
    * 서버 마감 시각(phaseEndsAt)과 동기화된 타이머 갱신
    */
@@ -2380,23 +2799,36 @@
       $('trading-timer-pill').textContent = `${room.currentYear}년 개장`;
       $('trading-timer-pill').classList.remove('urgent');
       $('opening-timer-badge').classList.add('hidden');
+      hide15SecWarningBanner();
       return;
     }
 
     const remainingMs = Math.max(0, room.phaseEndsAt - nowServer);
     const formatted = formatMMSS(remainingMs);
-    const isUrgent = remainingMs <= 10000;
+    const isUrgent = remainingMs <= 15000;
 
     if (room.status === 'TUTORIAL') {
       $('tutorial-timer-badge').textContent = formatted;
+      hide15SecWarningBanner();
     } else if (room.status === 'TRADING') {
       const pill = $('trading-timer-pill');
       pill.textContent = formatted;
       pill.classList.toggle('urgent', isUrgent);
+
+      // 서버 타이머 기준으로 남은 시간이 30초 이하로 처음 진입할 때 라운드당 1회만 경고 배너 표시
+      if (remainingMs > 0 && remainingMs <= 30000) {
+        const roundKey = `${room.code}:${room.gameNumber || 1}:${room.currentYear}:${room.phaseStartedAt}`;
+        trigger15SecWarningOnceForRound(roundKey);
+      } else if (remainingMs === 0) {
+        hide15SecWarningBanner();
+      }
     } else if (room.status === 'OPENING') {
       const opBadge = $('opening-timer-badge');
       opBadge.classList.remove('hidden');
       opBadge.textContent = formatted;
+      hide15SecWarningBanner();
+    } else {
+      hide15SecWarningBanner();
     }
   }
 
@@ -2407,16 +2839,14 @@
    */
   function switchTab(tabName) {
     if (uiState.activeTab === 'articles') {
-      const listUl = $('article-list-ul');
-      if (listUl) {
-        uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
-      }
+      saveCurrentArticleScrollState(uiState.articleNav);
     }
     uiState.activeTab = tabName;
     if (tabName === 'market') {
       uiState.showMyInvestment = false;
     } else if (tabName === 'articles') {
       uiState.cameFromArticles = false;
+      uiState.pendingArticleScrollRestore = true;
     }
     renderTradingScreen();
   }
@@ -2530,6 +2960,14 @@
    * 이벤트 리스너 바인딩
    */
   function bindEvents() {
+    // BGM 켜기/끄기 토글 버튼 (사용자 직접 조작 시 설정 저장)
+    const bgmBtn = $('btn-bgm-toggle');
+    if (bgmBtn) {
+      bgmBtn.addEventListener('click', () => {
+        setBgmEnabled(!uiState.bgmEnabled, { persist: true });
+      });
+    }
+
     // 게임 방법 안내 모달
     const openGuide = () => $('modal-guide').classList.remove('hidden');
     const closeGuide = () => $('modal-guide').classList.add('hidden');
@@ -2816,6 +3254,9 @@
 
     // 내 투자 토글 버튼
     const toggleMyInvestment = (forceVal) => {
+      if (uiState.activeTab === 'articles') {
+        saveCurrentArticleScrollState(uiState.articleNav);
+      }
       uiState.activeTab = 'market';
       uiState.showMyInvestment = typeof forceVal === 'boolean' ? forceVal : !uiState.showMyInvestment;
       renderTradingScreen();
@@ -2833,6 +3274,7 @@
     });
     $('btn-mobile-back-to-articles').addEventListener('click', () => {
       uiState.mobileShowReader = false;
+      uiState.pendingArticleScrollRestore = true;
       renderArticlesTab();
     });
     const backToArticleBtn = $('btn-back-to-reading-article');
@@ -2843,13 +3285,25 @@
       });
     }
 
-    // 기사 목록 스크롤 위치 실시간 저장 (시장·채팅 탭 다녀와도 복원)
+    // 기사 목록 스크롤 위치 실시간 저장 (PC 목록 요소 스크롤 및 모바일 페이지 스크롤 모두 대응)
     const artListUl = $('article-list-ul');
     if (artListUl) {
       artListUl.addEventListener('scroll', () => {
-        uiState.articleScrollTopByNav[uiState.articleNav] = artListUl.scrollTop;
+        if (isRenderingArticles || !isArticlesPanelActiveAndVisible()) return;
+        if (artListUl.offsetParent !== null) {
+          uiState.articleScrollTopByNav[uiState.articleNav] = artListUl.scrollTop;
+        }
       });
     }
+    window.addEventListener('scroll', () => {
+      if (isRenderingArticles || !isArticlesPanelActiveAndVisible()) return;
+      const navKey = uiState.articleNav || 'current_free';
+      if (isMobileReaderDrilldown()) {
+        uiState.articleReaderPageScrollYByNav[navKey] = getPageScrollY();
+      } else {
+        uiState.articlePageScrollYByNav[navKey] = getPageScrollY();
+      }
+    }, { passive: true });
 
     // 매수/매도 전환
     $('btn-side-buy').addEventListener('click', () => {
@@ -2923,18 +3377,18 @@
         uiState.articleFilter = chip.dataset.filter || 'ALL';
         uiState.selectedArchiveArticleId = null;
         uiState.articleScrollTopByNav.archive = 0;
+        uiState.articlePageScrollYByNav.archive = 0;
+        uiState.pendingArticleScrollRestore = true;
         renderArticlesTab();
       });
     });
 
     // 기사 내부 탐색 3가지 (올해 기사 / 유료 단서 / 보관함)
     const switchArticleNav = (nextNav) => {
-      const listUl = $('article-list-ul');
-      if (listUl) {
-        uiState.articleScrollTopByNav[uiState.articleNav] = listUl.scrollTop;
-      }
+      saveCurrentArticleScrollState(uiState.articleNav);
       uiState.articleNav = nextNav;
       uiState.mobileShowReader = false;
+      uiState.pendingArticleScrollRestore = true;
       renderArticlesTab();
     };
     $('btn-art-nav-current').addEventListener('click', () => switchArticleNav('current_free'));
@@ -2994,6 +3448,7 @@
    */
   async function init() {
     bindEvents();
+    initBgm();
 
     const saved = loadSession();
     if (saved && saved.roomCode && saved.participantId && saved.token) {
@@ -3021,6 +3476,18 @@
   window.__ANT_SQUARE__ = {
     getState: () => appState,
     getSession: () => session,
+    getUiState: () => uiState,
+    getUnreadChatCounts: () => computeUnreadChatCounts(),
+    getBgmStatus: () => ({
+      enabled: uiState.bgmEnabled,
+      stored: localStorage.getItem(BGM_STORAGE_KEY),
+      hasAudioInstance: Boolean(bgmAudio),
+      paused: bgmAudio ? bgmAudio.paused : true,
+      loop: bgmAudio ? bgmAudio.loop : false,
+      volume: bgmAudio ? bgmAudio.volume : 0,
+      src: bgmAudio ? bgmAudio.src : null
+    }),
+    forceTimerCheck: () => updateTimersDisplay(),
     submitOrderWithId: (requestId) => handleSubmitOrder(requestId)
   };
 

@@ -8,8 +8,11 @@ module.exports = {
   ANNUAL_GRANT: 50000,           // 2011~2019년의 결과를 보여준 후 참가자에게 지급 (50,000원)
 
   // 유료 기사 공통 가격 공식 (기획서 3쪽, 14쪽)
-  // 연간 지원금 지급 후 총자산 중앙값 * 2%를 1,000원 단위로 내림, 최소 1,000원
+  // 연간 지원금 지급 후 총자산 중앙값 * (기준 비율 * (1 + 인상률))을 1,000원 단위로 내림, 최소 1,000원
   ARTICLE_PRICE_RATE: 0.02,
+  ARTICLE_PRICE_INCREASE_RATE: process.env.ARTICLE_PRICE_INCREASE_RATE
+    ? Number(process.env.ARTICLE_PRICE_INCREASE_RATE)
+    : 0.25,                        // 현행 가격 산정 비율 대비 25% 인상 (0.02 -> 0.025)
   ARTICLE_PRICE_UNIT: 1000,
   ARTICLE_MIN_PRICE: 1000,
 
