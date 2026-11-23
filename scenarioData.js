@@ -32,7 +32,7 @@ const STOCKS = [
     industry: '바이오',
     publicBusiness: '신약 연구·개발',
     description: '대사질환 및 면역 신약 파이프라인 연구·개발',
-    basePriceRange: [18000000, 28000000]
+    basePriceRange: [18000, 28000]
   },
   {
     id: 'b_bio',
@@ -42,7 +42,7 @@ const STOCKS = [
     industry: '바이오',
     publicBusiness: '신약 연구·개발',
     description: '합성신약 및 바이오 의약품 연구·개발',
-    basePriceRange: [14000000, 23000000]
+    basePriceRange: [14000, 23000]
   },
   {
     id: 'a_enter',
@@ -52,7 +52,7 @@ const STOCKS = [
     industry: '엔터',
     publicBusiness: '아티스트 기획·공연·음반',
     description: '글로벌 콘서트 투어 기획 및 음반 제작',
-    basePriceRange: [15000000, 25000000]
+    basePriceRange: [15000, 25000]
   },
   {
     id: 'b_enter',
@@ -62,7 +62,7 @@ const STOCKS = [
     industry: '엔터',
     publicBusiness: '영화·드라마 제작 및 판권 판매',
     description: '텐트폴 드라마·영화 제작 및 글로벌 OTT 판권 공급',
-    basePriceRange: [12000000, 21000000]
+    basePriceRange: [12000, 21000]
   },
   {
     id: 'a_semi',
@@ -72,7 +72,7 @@ const STOCKS = [
     industry: '반도체',
     publicBusiness: '메모리 제조',
     description: 'D램 및 낸드플래시 메모리 반도체 생산',
-    basePriceRange: [24000000, 36000000]
+    basePriceRange: [24000, 36000]
   },
   {
     id: 'b_semi',
@@ -82,7 +82,7 @@ const STOCKS = [
     industry: '반도체',
     publicBusiness: '반도체 장비 공급',
     description: '반도체 전공정 증착·식각 설비 제작 및 납품',
-    basePriceRange: [19000000, 30000000]
+    basePriceRange: [19000, 30000]
   },
   {
     id: 'a_food',
@@ -92,7 +92,7 @@ const STOCKS = [
     industry: '식품',
     publicBusiness: '곡물 기반 가공식품',
     description: '제분·사료·간편식 제조 및 국내외 식품 유통',
-    basePriceRange: [8000000, 15000000]
+    basePriceRange: [8000, 15000]
   },
   {
     id: 'a_game',
@@ -102,7 +102,7 @@ const STOCKS = [
     industry: '게임',
     publicBusiness: '모바일 게임 개발·서비스',
     description: '모바일 RPG 개발 및 글로벌 라이브 서비스',
-    basePriceRange: [11000000, 19000000]
+    basePriceRange: [11000, 19000]
   },
   {
     id: 'a_ship',
@@ -112,7 +112,7 @@ const STOCKS = [
     industry: '조선',
     publicBusiness: '대형 선박 건조',
     description: '초대형 컨테이너선 및 LNG 운반선 건조·수출',
-    basePriceRange: [16000000, 26000000]
+    basePriceRange: [16000, 26000]
   },
   {
     id: 'a_air',
@@ -122,7 +122,7 @@ const STOCKS = [
     industry: '항공',
     publicBusiness: '국제선 여객 운송',
     description: '중·단거리 및 장거리 국제선 여객·화물 항공 운송',
-    basePriceRange: [12000000, 20000000]
+    basePriceRange: [12000, 20000]
   }
 ];
 
@@ -1467,13 +1467,13 @@ function generateBioMultiYearArc({ startYear, durationYears, obesityOwnerId, vac
       });
     }
 
-    // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
+    // 플레이 피드백: 기사 본문 보강 및 유료 단서 결론 요약 문단 정리
+    const bioStageType = getArcStageType(step, durationYears);
     if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.bio[step - 2])) {
-      const bioStageType = getArcStageType(step, durationYears);
       freeBody = extendArcFreeBody('bio', bioStageType, freeBody);
-      extendArcPaidList('bio', 'obesity', bioStageType, obesityPos, obesityPair);
-      extendArcPaidList('bio', 'vaccine', bioStageType, vaccinePos, vaccinePair);
     }
+    extendArcPaidList('bio', 'obesity', bioStageType, obesityPos, obesityPair);
+    extendArcPaidList('bio', 'vaccine', bioStageType, vaccinePos, vaccinePair);
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -1767,12 +1767,12 @@ function generateShipMultiYearArc({ startYear, durationYears, finalMode }) {
       });
     }
 
-    // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
+    // 플레이 피드백: 기사 본문 보강 및 유료 단서 결론 요약 문단 정리
+    const shipStageType = getArcStageType(step, durationYears);
     if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.ship[step - 2])) {
-      const shipStageType = getArcStageType(step, durationYears);
       fBody = extendArcFreeBody('ship', shipStageType, fBody);
-      extendArcPaidList('ship', 'a_ship', shipStageType, isPos, paidPair);
     }
+    extendArcPaidList('ship', 'a_ship', shipStageType, isPos, paidPair);
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -2196,13 +2196,13 @@ function generateSemiMultiYearArc({ startYear, durationYears, finalSuccess }) {
       });
     }
 
-    // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
+    // 플레이 피드백: 기사 본문 보강 및 유료 단서 결론 요약 문단 정리
+    const semiStageType = getArcStageType(step, durationYears);
     if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.semi[step - 2])) {
-      const semiStageType = getArcStageType(step, durationYears);
       fBody = extendArcFreeBody('semi', semiStageType, fBody);
-      extendArcPaidList('semi', 'a_semi', semiStageType, aPos, aPair);
-      extendArcPaidList('semi', 'b_semi', semiStageType, bPos, bPair);
     }
+    extendArcPaidList('semi', 'a_semi', semiStageType, aPos, aPair);
+    extendArcPaidList('semi', 'b_semi', semiStageType, bPos, bPair);
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -2316,8 +2316,8 @@ function generateDynamicScenario(excludedSignatures = []) {
   pricesByYear[2010] = {};
   for (const stock of STOCKS) {
     const [minP, maxP] = stock.basePriceRange;
-    const steps = Math.floor((maxP - minP) / 500000);
-    pricesByYear[2010][stock.id] = minP + randInt(0, steps) * 500000;
+    const steps = Math.floor((maxP - minP) / 500);
+    pricesByYear[2010][stock.id] = minP + randInt(0, steps) * 500;
   }
 
   // 2011년 첫 개장 시세 생성 (상승 4~6종목, 하락 4~6종목 혼합)
@@ -2332,9 +2332,9 @@ function generateDynamicScenario(excludedSignatures = []) {
     const absRate = randFloat(0.04, 0.18);
     const signedRate = isUp ? absRate : -absRate;
     const prevP = pricesByYear[2010][stock.id];
-    let nextP = Math.max(1000, Math.round((prevP * (1 + signedRate)) / 10000) * 10000);
+    let nextP = Math.max(1, Math.round((prevP * (1 + signedRate)) / 10) * 10);
     if (nextP === prevP) {
-      nextP = isUp ? prevP + 500000 : Math.max(1000, prevP - 500000);
+      nextP = isUp ? prevP + 500 : Math.max(1, prevP - 500);
     }
     pricesByYear[2011][stock.id] = nextP;
     const reasonPool = isUp ? OPENING_2011_REASONS[stock.id].up : OPENING_2011_REASONS[stock.id].down;
@@ -2533,9 +2533,9 @@ function generateDynamicScenario(excludedSignatures = []) {
     for (const stock of STOCKS) {
       const prevPrice = pricesByYear[tradeYear][stock.id];
       const outcome = yearOutcomesByStock[stock.id];
-      let nextPrice = Math.max(1000, Math.round((prevPrice * (1 + outcome.rate)) / 1000) * 1000);
+      let nextPrice = Math.max(1, Math.round(prevPrice * (1 + outcome.rate)));
       if (nextPrice === prevPrice) {
-        nextPrice = outcome.rate >= 0 ? prevPrice + 100000 : Math.max(1000, prevPrice - 100000);
+        nextPrice = outcome.rate >= 0 ? prevPrice + 100 : Math.max(1, prevPrice - 100);
       }
       pricesByYear[openingYear][stock.id] = nextPrice;
       openingReasonsByYear[openingYear][stock.id] = outcome.reason;
@@ -2587,40 +2587,40 @@ function createVerificationScenarioP7() {
     },
     pricesByYear: {
       2010: {
-        a_bio: 22000000,
-        b_bio: 19000000,
-        a_enter: 18500000,
-        b_enter: 15000000,
-        a_semi: 32000000,
-        b_semi: 23000000,
-        a_food: 10500000,
-        a_game: 13000000,
-        a_ship: 19000000,
-        a_air: 16000000
+        a_bio: 22000,
+        b_bio: 19000,
+        a_enter: 18500,
+        b_enter: 15000,
+        a_semi: 32000,
+        b_semi: 23000,
+        a_food: 10500,
+        a_game: 13000,
+        a_ship: 19000,
+        a_air: 16000
       },
       2011: {
-        a_bio: 24000000,
-        b_bio: 18000000,
-        a_enter: 20000000,
-        b_enter: 16000000,
-        a_semi: 30000000,
-        b_semi: 25000000,
-        a_food: 10000000,
-        a_game: 14000000,
-        a_ship: 22000000,
-        a_air: 15000000
+        a_bio: 24000,
+        b_bio: 18000,
+        a_enter: 20000,
+        b_enter: 16000,
+        a_semi: 30000,
+        b_semi: 25000,
+        a_food: 10000,
+        a_game: 14000,
+        a_ship: 22000,
+        a_air: 15000
       },
       2012: {
-        a_bio: 26400000,
-        b_bio: 17460000,
-        a_enter: 22000000,
-        b_enter: 15680000,
-        a_semi: 28500000,
-        b_semi: 28000000,
-        a_food: 10800000,
-        a_game: 13020000,
-        a_ship: 22660000,
-        a_air: 15600000
+        a_bio: 26400,
+        b_bio: 17460,
+        a_enter: 22000,
+        b_enter: 15680,
+        a_semi: 28500,
+        b_semi: 28000,
+        a_food: 10800,
+        a_game: 13020,
+        a_ship: 22660,
+        a_air: 15600
       }
     },
     openingReasonsByYear: {

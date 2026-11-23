@@ -47,10 +47,91 @@ function appendToMiddleParagraph(body, sentence) {
   return paras.join('\n\n');
 }
 
+/**
+ * 기사 제목(postTitle)이나 마지막 문단에서 정답(호재/악재)을 떠먹여 주던 설명형 결론 문장을 제거하고,
+ * 첫 문단(배경·추진 경위)과 둘째 문단(새로 확인된 구체적 계약·일정·수치 사실)만으로
+ * 플레이어가 직접 다음 개장 결과를 추리하도록 다듬습니다.
+ */
+function sanitizePaidTitleForDeduction(title) {
+  if (!title) return title;
+  let t = String(title).trim();
+  // 제목에서 결과를 바로 알려주는 직접적 평가 어구를 사실·조건·일정 중심 표현으로 완화
+  const replacements = [
+    [/초기 마케팅비 과다 지출 및 유료 전환율 저조/g, '자체 숏폼 앱 독점 공급 전환 및 초기 프로모션 집행'],
+    [/과다 지출/g, '집행'],
+    [/과다 집행/g, '집행'],
+    [/전환율 저조/g, '전환 지표 집계'],
+    [/판매 부진/g, '판매 추이 점검'],
+    [/관객 미달/g, '상영 회차 조정'],
+    [/가동률 저조/g, '초기 가동 구간 진입'],
+    [/방문객 저조/g, '방문객 추이 점검'],
+    [/예약률 저조/g, '초기 예약 추이 점검'],
+    [/고마진 확보/g, '납품 계약 체결'],
+    [/원가율 크게 개선/g, '자체 가공 라인 적용'],
+    [/수익성 개선/g, '정산 구조 확정'],
+    [/대폭 절감/g, '비중 조정'],
+    [/완판/g, '선주문 마감'],
+    [/전석 매진/g, '선행 예매 진행'],
+    [/전 회차 선행 매진/g, '선행 예매 진행'],
+    [/손익분기 돌파/g, '초도 물량 집계'],
+    [/손익분기점 근접/g, '초기 좌석점유율 집계'],
+    [/회수 미달 구간 진입/g, '상영 일정 조정'],
+    [/일시 상각/g, '회계 처리 검토'],
+    [/대손충당금 설정/g, '결제 일정 조율'],
+    [/품질보증 충당금 설정/g, '호환성 업데이트 진행'],
+    [/지체상금 충당금 설정/g, '인도 일정 조율'],
+    [/공사손실충당금 검토/g, '후판 공급 단가 재협상'],
+    [/공사손실충당금/g, '원가 반영 조건'],
+    [/반품 누적/g, '유통 물량 재조정'],
+    [/반품 증가/g, '유통 재고 정산'],
+    [/할인 처분/g, '재고 소진 프로모션'],
+    [/덤핑 판매/g, '잔여 좌석 특가 편성'],
+    [/전면 중단/g, '방식 조정'],
+    [/협상 결렬/g, '단가 재협상 진행'],
+    [/정규 편성 불발/g, '파일럿 심사 종료'],
+    [/옵션 미행사 종료/g, '독점 평가 기간 만료']
+  ];
+  for (const [regex, rep] of replacements) {
+    t = t.replace(regex, rep);
+  }
+  return t;
+}
+
+function refinePaidBodyForDeduction(body) {
+  if (!body) return body;
+  const paras = String(body || '')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  // 3번째 문단("연말까지 ~ 이어지는 조건이다 / ~ 구조다 / ~ 상태다")은 앞서 나온 사실의 결과를 요약·단정해주어
+  // 추리 재미를 반감시키므로, 3문단일 때는 결론 요약 문단(3번째 문단)을 제거하고 1~2문단의 구체 사실만 남깁니다.
+  const kept = paras.length >= 3 ? paras.slice(0, 2) : paras;
+  return kept
+    .map((p) =>
+      p
+        .replace(/손실로 남는 조건이다\./g, '정산 일정이 조율 중이다.')
+        .replace(/손실이 발생하는 조건이다\./g, '고정비 정산 조건이 남아 있다.')
+        .replace(/일시 무형자산 손상차손으로 반영해야 한다\./g, '회계 반영 방식을 조율하고 있다.')
+        .replace(/대손충당금을 설정해야 하는 상황이다\./g, '대금 회수 일정을 재조율하고 있다.')
+        .replace(/원가 이하 땡처리 특가로 직접 처분하고 있다\./g, '직접 특가 프로모션으로 전환해 판매하고 있다.')
+    )
+    .join('\n\n');
+}
+
 function applyExtension(article, sentence) {
-  if (!article || !sentence) return;
+  if (!article) return;
   const oldBody = article.body;
-  const newBody = appendToMiddleParagraph(oldBody, sentence);
+  let newBody = sentence ? appendToMiddleParagraph(oldBody, sentence) : oldBody;
+  if (article.type === 'paid') {
+    newBody = refinePaidBodyForDeduction(newBody);
+    if (article.postTitle) {
+      article.postTitle = sanitizePaidTitleForDeduction(article.postTitle);
+    }
+    if (article.fallbackPostTitle) {
+      article.fallbackPostTitle = sanitizePaidTitleForDeduction(article.fallbackPostTitle);
+    }
+  }
   article.body = newBody;
   if (Object.prototype.hasOwnProperty.call(article, 'fallbackBody')) {
     article.fallbackBody = newBody;
@@ -280,12 +361,13 @@ function extendArcFreeBody(arcType, stageType, body) {
  * @param {string} roleKey 바이오: 'obesity' | 'vaccine', 조선·반도체: 종목 ID
  */
 function extendArcPaidList(arcType, roleKey, stageType, isPositive, paidList) {
+  if (!Array.isArray(paidList)) return;
   const roleMap = ARC_EXT[arcType] && ARC_EXT[arcType].paid[roleKey];
   const stageMap = roleMap && roleMap[stageType];
-  if (!stageMap || !Array.isArray(paidList)) return;
   for (const art of paidList) {
     const key = art.clueType === 'single' ? (isPositive ? 'pos' : 'neg') : art.clueType;
-    applyExtension(art, resolveSentence(stageMap[key], art.stockId));
+    const sentence = stageMap ? resolveSentence(stageMap[key], art.stockId) : null;
+    applyExtension(art, sentence);
   }
 }
 
