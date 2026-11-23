@@ -18,6 +18,10 @@ const {
   extendArcFreeBody,
   extendArcPaidList
 } = require('./articleExtensions');
+const {
+  EXTRA_SINGLE_YEAR_TEMPLATES,
+  EXTRA_ARC_MIDDLE_STAGES
+} = require('./singleYearTemplatesExtra');
 
 const STOCKS = [
   {
@@ -28,7 +32,7 @@ const STOCKS = [
     industry: '바이오',
     publicBusiness: '신약 연구·개발',
     description: '대사질환 및 면역 신약 파이프라인 연구·개발',
-    basePriceRange: [18000, 28000]
+    basePriceRange: [18000000, 28000000]
   },
   {
     id: 'b_bio',
@@ -38,7 +42,7 @@ const STOCKS = [
     industry: '바이오',
     publicBusiness: '신약 연구·개발',
     description: '합성신약 및 바이오 의약품 연구·개발',
-    basePriceRange: [14000, 23000]
+    basePriceRange: [14000000, 23000000]
   },
   {
     id: 'a_enter',
@@ -48,7 +52,7 @@ const STOCKS = [
     industry: '엔터',
     publicBusiness: '아티스트 기획·공연·음반',
     description: '글로벌 콘서트 투어 기획 및 음반 제작',
-    basePriceRange: [15000, 25000]
+    basePriceRange: [15000000, 25000000]
   },
   {
     id: 'b_enter',
@@ -58,7 +62,7 @@ const STOCKS = [
     industry: '엔터',
     publicBusiness: '영화·드라마 제작 및 판권 판매',
     description: '텐트폴 드라마·영화 제작 및 글로벌 OTT 판권 공급',
-    basePriceRange: [12000, 21000]
+    basePriceRange: [12000000, 21000000]
   },
   {
     id: 'a_semi',
@@ -68,7 +72,7 @@ const STOCKS = [
     industry: '반도체',
     publicBusiness: '메모리 제조',
     description: 'D램 및 낸드플래시 메모리 반도체 생산',
-    basePriceRange: [24000, 36000]
+    basePriceRange: [24000000, 36000000]
   },
   {
     id: 'b_semi',
@@ -78,7 +82,7 @@ const STOCKS = [
     industry: '반도체',
     publicBusiness: '반도체 장비 공급',
     description: '반도체 전공정 증착·식각 설비 제작 및 납품',
-    basePriceRange: [19000, 30000]
+    basePriceRange: [19000000, 30000000]
   },
   {
     id: 'a_food',
@@ -88,7 +92,7 @@ const STOCKS = [
     industry: '식품',
     publicBusiness: '곡물 기반 가공식품',
     description: '제분·사료·간편식 제조 및 국내외 식품 유통',
-    basePriceRange: [8000, 15000]
+    basePriceRange: [8000000, 15000000]
   },
   {
     id: 'a_game',
@@ -98,7 +102,7 @@ const STOCKS = [
     industry: '게임',
     publicBusiness: '모바일 게임 개발·서비스',
     description: '모바일 RPG 개발 및 글로벌 라이브 서비스',
-    basePriceRange: [11000, 19000]
+    basePriceRange: [11000000, 19000000]
   },
   {
     id: 'a_ship',
@@ -108,7 +112,7 @@ const STOCKS = [
     industry: '조선',
     publicBusiness: '대형 선박 건조',
     description: '초대형 컨테이너선 및 LNG 운반선 건조·수출',
-    basePriceRange: [16000, 26000]
+    basePriceRange: [16000000, 26000000]
   },
   {
     id: 'a_air',
@@ -118,7 +122,7 @@ const STOCKS = [
     industry: '항공',
     publicBusiness: '국제선 여객 운송',
     description: '중·단거리 및 장거리 국제선 여객·화물 항공 운송',
-    basePriceRange: [12000, 20000]
+    basePriceRange: [12000000, 20000000]
   }
 ];
 
@@ -921,6 +925,13 @@ const SINGLE_YEAR_TEMPLATES = {
   ]
 };
 
+// 한 판(9개 거래 연도) 내 동일 종목의 단년 기사가 중복되지 않도록 추가 단년 사건 템플릿 병합
+for (const [stockId, extraList] of Object.entries(EXTRA_SINGLE_YEAR_TEMPLATES)) {
+  if (Array.isArray(SINGLE_YEAR_TEMPLATES[stockId]) && Array.isArray(extraList)) {
+    SINGLE_YEAR_TEMPLATES[stockId].push(...extraList);
+  }
+}
+
 /**
  * 선택형 유료 단서 2개(일정 단서 + 사업 리스크 단서) 객체를 생성하는 헬퍼
  * - 두 단서는 동일한 choiceGroup(`${year}_${stockId}`)을 공유하여 서버와 화면에서 1종목·1연도 1개만 구매하도록 묶입니다.
@@ -1244,82 +1255,137 @@ function generateBioMultiYearArc({ startYear, durationYears, obesityOwnerId, vac
     } else if (!isLast) {
       const midObesityPos = (step % 2 === 1) ? true : obesityFinalSuccess;
       const midVaccinePos = (step % 2 === 0) ? true : vaccineFinalSuccess;
+      const extraStageTpl = EXTRA_ARC_MIDDLE_STAGES.bio[step - 2] || null;
 
-      freeTitle = `바이오 장기 파이프라인, 다국가 임상 사이트 확대 및 상업 공정 실사 진행`;
-      freeSummary = `다국가 환자 모집 진척도와 원액 배양 공정 검증 현황 점검 (${arcStageLabel})`;
-      freeBody = [
-        `국내 바이오 업계에서 수년간 이어진 신약 및 항원 프로젝트들이 다국가 임상 사이트 확대와 상업용 원액 생산 실사 구간에 진입했다.`,
-        `해외 임상 기관을 통한 환자 모집 속도와 연속 배치 배양 수율이 올해 핵심 점검 지표로 확인됐으며, 담당 회사명은 여전히 비공개로 유지되고 있다.`,
-        `사이트 추가 개설에 따른 위탁연구기관(CRO) 수수료나 무균 충전 라인 추가 검증 요구가 발생할 경우 비용과 일정에 부담이 생길 수 있는 조건이다.`
-      ].join('\n\n');
+      if (extraStageTpl) {
+        freeTitle = extraStageTpl.freeTitle;
+        freeSummary = `${extraStageTpl.freeSummary} (${arcStageLabel})`;
+        freeBody = extraStageTpl.freeBody;
 
-      obesityPos = midObesityPos;
-      obesityRate = midObesityPos
-        ? Number(randFloat(0.05, 0.13).toFixed(3))
-        : Number(randFloat(-0.11, -0.04).toFixed(3));
-      obesityReason = midObesityPos
-        ? '다국가 임상 사이트 환자 모집 순항 및 공동연구 마일스톤 유입이 반영됐습니다.'
-        : '다국가 임상 위탁기관(CRO) 운영 비용 증가가 반영됐습니다.';
+        obesityPos = midObesityPos;
+        obesityRate = midObesityPos
+          ? Number(randFloat(0.05, 0.13).toFixed(3))
+          : Number(randFloat(-0.11, -0.04).toFixed(3));
+        obesityReason = midObesityPos ? extraStageTpl.obesityReasonPos : extraStageTpl.obesityReasonNeg;
 
-      obesityPair = createSingleArcPaidClue({
-        year: y,
-        stock: obesityStock,
-        arcStageLabel,
-        isPositive: obesityPos,
-        topic: '다국가 임상 운영 및 연구비 현황',
-        subtitle: `${obesityStock.name}의 다국가 임상 사이트 운영 및 비용 집행 현황 조사`,
-        postTitle: midObesityPos
-          ? `${obesityStock.name}, 다국가 대사질환 임상 목표 모집률 달성 및 단계별 마일스톤 수령`
-          : `${obesityStock.name}, 해외 임상 사이트 추가 개설 및 위탁연구기관(CRO) 수수료 지출 확대`,
-        body: midObesityPos
-          ? [
-              `${obesityStock.name}가 해외 다국가 임상 사이트에서 대사질환 환자 목표 모집률을 예정보다 앞서 채웠다.`,
-              `모집 마일스톤 달성 조건이 충족되면서 공동연구 파트너사로부터 단계별 연구 기술료가 연내 정산된다.`,
-              `다만 최종 유효성 통계 분석은 전체 투여 추적 기간이 끝난 뒤 별도로 진행된다.`
-            ].join('\n\n')
-          : [
-              `${obesityStock.name}가 다국가 대사질환 임상의 환자 모집 속도를 유지하기 위해 해외 위탁연구기관(CRO) 사이트를 추가 개설했다.`,
-              `임상 사이트 확대에 따른 운영 수수료와 모니터링 비용이 올해 집중적으로 집행되는 구조다.`,
-              `별도의 마일스톤 기술료 유입 없이 연구개발비 지출만 먼저 반영되는 조건이 이어지고 있다.`
-            ].join('\n\n'),
-        highlightNote: midObesityPos
-          ? '다국가 대사질환 임상 모집 목표 달성과 단계별 기술료 정산 조건이 확인됐습니다.'
-          : '해외 임상 사이트 추가 개설에 따른 위탁연구비 선집행 조건이 확인됐습니다.'
-      });
+        obesityPair = createSingleArcPaidClue({
+          year: y,
+          stock: obesityStock,
+          arcStageLabel,
+          isPositive: obesityPos,
+          topic: extraStageTpl.obesityTopic,
+          subtitle: extraStageTpl.obesitySubtitle(obesityStock.name),
+          postTitle: midObesityPos
+            ? extraStageTpl.obesityPostTitlePos(obesityStock.name)
+            : extraStageTpl.obesityPostTitleNeg(obesityStock.name),
+          body: midObesityPos
+            ? extraStageTpl.obesityBodyPos(obesityStock.name)
+            : extraStageTpl.obesityBodyNeg(obesityStock.name),
+          highlightNote: midObesityPos
+            ? extraStageTpl.obesityHighlightPos
+            : extraStageTpl.obesityHighlightNeg
+        });
 
-      vaccinePos = midVaccinePos;
-      vaccineRate = midVaccinePos
-        ? Number(randFloat(0.05, 0.13).toFixed(3))
-        : Number(randFloat(-0.10, -0.04).toFixed(3));
-      vaccineReason = midVaccinePos
-        ? '항원 원액 대량 배양 공정 수율 안정화가 반영됐습니다.'
-        : '항원 생산 라인 무균 공정 추가 검증 비용이 반영됐습니다.';
+        vaccinePos = midVaccinePos;
+        vaccineRate = midVaccinePos
+          ? Number(randFloat(0.05, 0.13).toFixed(3))
+          : Number(randFloat(-0.10, -0.04).toFixed(3));
+        vaccineReason = midVaccinePos ? extraStageTpl.vaccineReasonPos : extraStageTpl.vaccineReasonNeg;
 
-      vaccinePair = createSingleArcPaidClue({
-        year: y,
-        stock: vaccineStock,
-        arcStageLabel,
-        isPositive: vaccinePos,
-        topic: '다국가 임상 운영 및 연구비 현황',
-        subtitle: `${vaccineStock.name}의 다국가 임상 사이트 운영 및 비용 집행 현황 조사`,
-        postTitle: midVaccinePos
-          ? `${vaccineStock.name}, 상업용 항원 원액 연속 배양 수율 확보 및 해외 조달 중간 실사 통과`
-          : `${vaccineStock.name}, 항원 원액 무균 충전 라인 추가 밸리데이션 요구로 생산 순연`,
-        body: midVaccinePos
-          ? [
-              `${vaccineStock.name}가 상업용 스케일의 항원 원액 연속 배치 배양에서 균일한 수율 지표를 확보했다.`,
-              `이에 따라 해외 공공조달 기관의 중간 공정 실사를 통과해 본허가 심사 준비 단계로 넘어갔다.`,
-              `최종 품목 허가와 장기 공급 계약은 후속 최종 심의 절차를 거쳐야 확정된다.`
-            ].join('\n\n')
-          : [
-              `${vaccineStock.name}의 항원 원액 충전 라인에서 무균 공정 추가 밸리데이션 요구가 통보됐다.`,
-              `설비 보완과 재검증이 끝날 때까지 상업용 시료 생산 일정이 내년 이후로 미뤄졌다.`,
-              `라인 가동 지연 기간 동안 설비 유지비와 재검증 비용이 추가로 발생하는 조건이다.`
-            ].join('\n\n'),
-        highlightNote: midVaccinePos
-          ? '상업용 항원 원액 연속 배양 수율 확보와 중간 공정 실사 통과가 확인됐습니다.'
-          : '무균 충전 라인 추가 검증에 따른 생산 일정 지연과 보완 비용 조건이 확인됐습니다.'
-      });
+        vaccinePair = createSingleArcPaidClue({
+          year: y,
+          stock: vaccineStock,
+          arcStageLabel,
+          isPositive: vaccinePos,
+          topic: extraStageTpl.vaccineTopic,
+          subtitle: extraStageTpl.vaccineSubtitle(vaccineStock.name),
+          postTitle: midVaccinePos
+            ? extraStageTpl.vaccinePostTitlePos(vaccineStock.name)
+            : extraStageTpl.vaccinePostTitleNeg(vaccineStock.name),
+          body: midVaccinePos
+            ? extraStageTpl.vaccineBodyPos(vaccineStock.name)
+            : extraStageTpl.vaccineBodyNeg(vaccineStock.name),
+          highlightNote: midVaccinePos
+            ? extraStageTpl.vaccineHighlightPos
+            : extraStageTpl.vaccineHighlightNeg
+        });
+      } else {
+        freeTitle = `바이오 장기 파이프라인, 다국가 임상 사이트 확대 및 상업 공정 실사 진행`;
+        freeSummary = `다국가 환자 모집 진척도와 원액 배양 공정 검증 현황 점검 (${arcStageLabel})`;
+        freeBody = [
+          `국내 바이오 업계에서 수년간 이어진 신약 및 항원 프로젝트들이 다국가 임상 사이트 확대와 상업용 원액 생산 실사 구간에 진입했다.`,
+          `해외 임상 기관을 통한 환자 모집 속도와 연속 배치 배양 수율이 올해 핵심 점검 지표로 확인됐으며, 담당 회사명은 여전히 비공개로 유지되고 있다.`,
+          `사이트 추가 개설에 따른 위탁연구기관(CRO) 수수료나 무균 충전 라인 추가 검증 요구가 발생할 경우 비용과 일정에 부담이 생길 수 있는 조건이다.`
+        ].join('\n\n');
+
+        obesityPos = midObesityPos;
+        obesityRate = midObesityPos
+          ? Number(randFloat(0.05, 0.13).toFixed(3))
+          : Number(randFloat(-0.11, -0.04).toFixed(3));
+        obesityReason = midObesityPos
+          ? '다국가 임상 사이트 환자 모집 순항 및 공동연구 마일스톤 유입이 반영됐습니다.'
+          : '다국가 임상 위탁기관(CRO) 운영 비용 증가가 반영됐습니다.';
+
+        obesityPair = createSingleArcPaidClue({
+          year: y,
+          stock: obesityStock,
+          arcStageLabel,
+          isPositive: obesityPos,
+          topic: '다국가 임상 운영 및 연구비 현황',
+          subtitle: `${obesityStock.name}의 다국가 임상 사이트 운영 및 비용 집행 현황 조사`,
+          postTitle: midObesityPos
+            ? `${obesityStock.name}, 다국가 대사질환 임상 목표 모집률 달성 및 단계별 마일스톤 수령`
+            : `${obesityStock.name}, 해외 임상 사이트 추가 개설 및 위탁연구기관(CRO) 수수료 지출 확대`,
+          body: midObesityPos
+            ? [
+                `${obesityStock.name}가 해외 다국가 임상 사이트에서 대사질환 환자 목표 모집률을 예정보다 앞서 채웠다.`,
+                `모집 마일스톤 달성 조건이 충족되면서 공동연구 파트너사로부터 단계별 연구 기술료가 연내 정산된다.`,
+                `다만 최종 유효성 통계 분석은 전체 투여 추적 기간이 끝난 뒤 별도로 진행된다.`
+              ].join('\n\n')
+            : [
+                `${obesityStock.name}가 다국가 대사질환 임상의 환자 모집 속도를 유지하기 위해 해외 위탁연구기관(CRO) 사이트를 추가 개설했다.`,
+                `임상 사이트 확대에 따른 운영 수수료와 모니터링 비용이 올해 집중적으로 집행되는 구조다.`,
+                `별도의 마일스톤 기술료 유입 없이 연구개발비 지출만 먼저 반영되는 조건이 이어지고 있다.`
+              ].join('\n\n'),
+          highlightNote: midObesityPos
+            ? '다국가 대사질환 임상 모집 목표 달성과 단계별 기술료 정산 조건이 확인됐습니다.'
+            : '해외 임상 사이트 추가 개설에 따른 위탁연구비 선집행 조건이 확인됐습니다.'
+        });
+
+        vaccinePos = midVaccinePos;
+        vaccineRate = midVaccinePos
+          ? Number(randFloat(0.05, 0.13).toFixed(3))
+          : Number(randFloat(-0.10, -0.04).toFixed(3));
+        vaccineReason = midVaccinePos
+          ? '항원 원액 대량 배양 공정 수율 안정화가 반영됐습니다.'
+          : '항원 생산 라인 무균 공정 추가 검증 비용이 반영됐습니다.';
+
+        vaccinePair = createSingleArcPaidClue({
+          year: y,
+          stock: vaccineStock,
+          arcStageLabel,
+          isPositive: vaccinePos,
+          topic: '다국가 임상 운영 및 연구비 현황',
+          subtitle: `${vaccineStock.name}의 다국가 임상 사이트 운영 및 비용 집행 현황 조사`,
+          postTitle: midVaccinePos
+            ? `${vaccineStock.name}, 상업용 항원 원액 연속 배양 수율 확보 및 해외 조달 중간 실사 통과`
+            : `${vaccineStock.name}, 항원 원액 무균 충전 라인 추가 밸리데이션 요구로 생산 순연`,
+          body: midVaccinePos
+            ? [
+                `${vaccineStock.name}가 상업용 스케일의 항원 원액 연속 배치 배양에서 균일한 수율 지표를 확보했다.`,
+                `이에 따라 해외 공공조달 기관의 중간 공정 실사를 통과해 본허가 심사 준비 단계로 넘어갔다.`,
+                `최종 품목 허가와 장기 공급 계약은 후속 최종 심의 절차를 거쳐야 확정된다.`
+              ].join('\n\n')
+            : [
+                `${vaccineStock.name}의 항원 원액 충전 라인에서 무균 공정 추가 밸리데이션 요구가 통보됐다.`,
+                `설비 보완과 재검증이 끝날 때까지 상업용 시료 생산 일정이 내년 이후로 미뤄졌다.`,
+                `라인 가동 지연 기간 동안 설비 유지비와 재검증 비용이 추가로 발생하는 조건이다.`
+              ].join('\n\n'),
+          highlightNote: midVaccinePos
+            ? '상업용 항원 원액 연속 배양 수율 확보와 중간 공정 실사 통과가 확인됐습니다.'
+            : '무균 충전 라인 추가 검증에 따른 생산 일정 지연과 보완 비용 조건이 확인됐습니다.'
+        });
+      }
     } else {
       freeTitle = `${variant.projectAName} 최종 데이터 잠금 및 ${variant.projectBName} 최종 심의 개시`;
       freeSummary = `${durationYears}년 바이오 장기 과제의 최종 판정 일정과 막바지 유효성·실사 조건 점검 (${durationYears}/${durationYears} 최종 단계)`;
@@ -1402,10 +1468,12 @@ function generateBioMultiYearArc({ startYear, durationYears, obesityOwnerId, vac
     }
 
     // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
-    const bioStageType = getArcStageType(step, durationYears);
-    freeBody = extendArcFreeBody('bio', bioStageType, freeBody);
-    extendArcPaidList('bio', 'obesity', bioStageType, obesityPos, obesityPair);
-    extendArcPaidList('bio', 'vaccine', bioStageType, vaccinePos, vaccinePair);
+    if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.bio[step - 2])) {
+      const bioStageType = getArcStageType(step, durationYears);
+      freeBody = extendArcFreeBody('bio', bioStageType, freeBody);
+      extendArcPaidList('bio', 'obesity', bioStageType, obesityPos, obesityPair);
+      extendArcPaidList('bio', 'vaccine', bioStageType, vaccinePos, vaccinePair);
+    }
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -1584,46 +1652,71 @@ function generateShipMultiYearArc({ startYear, durationYears, finalMode }) {
       });
     } else if (!isLast) {
       isPos = (step % 2 === 1) ? true : (finalMode !== 'breakdown');
-      fTitle = `${variant.clientRegion} 장기 선대 협상, 연료 탱크 상세 설계 및 도크 슬롯 조율`;
-      fSum = `국제 선급 상세 설계 승인과 핵심 기자재 납기 조율 현황 점검 (${arcStageLabel})`;
-      fBody = [
-        `장기 협상이 이어지고 있는 ${variant.vesselType} 프로젝트가 친환경 연료 저장탱크 상세 설계와 연도별 도크 건조 슬롯 배정 구간에 들어섰다.`,
-        `선급 기관의 설계 검토와 함께 전용 건조 도크 확보 작업이 병행되고 있으며, 주요 엔진 밸브와 보냉재 협력사의 납기 일정도 함께 점검되고 있다.`,
-        `핵심 기자재 납기 병목이 생기면 선박 인도 슬롯 순서를 다시 조율해야 하는 조건이 남아 있어 본계약 전 공정 안정성 확인이 요구된다.`
-      ].join('\n\n');
+      const extraShipTpl = EXTRA_ARC_MIDDLE_STAGES.ship[step - 2] || null;
 
-      rate = isPos
-        ? Number(randFloat(0.04, 0.11).toFixed(3))
-        : Number(randFloat(-0.09, -0.04).toFixed(3));
-      reason = isPos
-        ? '친환경 선박 추진 계통 상세 설계 승인 및 도크 슬롯 배정 완료가 반영됐습니다.'
-        : '선박 기자재 납기 조율 및 후판 원가 부담이 반영됐습니다.';
+      if (extraShipTpl) {
+        fTitle = extraShipTpl.freeTitle(variant);
+        fSum = extraShipTpl.freeSummary(arcStageLabel);
+        fBody = extraShipTpl.freeBody(variant);
 
-      paidPair = createSingleArcPaidClue({
-        year: y,
-        stock: shipStock,
-        arcStageLabel,
-        isPositive: isPos,
-        topic: '친환경 선박 상세 설계 및 도크 배정 현황',
-        subtitle: `A조선의 ${variant.vesselType} 상세 설계 승인 및 도크 배정 현황 조사`,
-        postTitle: isPos
-          ? `A조선, 친환경 연료 저장탱크 선급 승인 완료 및 전용 도크 슬롯 배정`
-          : `A조선, 핵심 엔진 기자재 납기 지연으로 선박 인도 슬롯 재조정 협의`,
-        body: isPos
-          ? [
-              `A 조선이 ${variant.vesselType}의 친환경 연료 저장탱크 상세 설계에 대해 국제 선급 기관의 승인을 마쳤다.`,
-              `설계 승인과 함께 연속 건조를 위한 전용 도크 슬롯 배정도 마무리돼 건조 준비 공정이 계획대로 정리됐다.`,
-              `다만 최종 본계약 체결 여부는 선주 측 이사회 승인과 금융 보증 최종 확정을 거쳐 결정된다.`
-            ].join('\n\n')
-          : [
-              `친환경 엔진에 들어가는 핵심 밸브와 보냉재 납기가 길어지면서 A 조선의 건조 공정 일정 조정이 불가피해졌다.`,
-              `A 조선은 선주 측과 선박 인도 슬롯 순서를 다시 조율하고 있으며, 일부 공정 대기 비용이 추가로 발생하고 있다.`,
-              `기자재 납기 정상화와 추가 원가 분담 합의가 남아 있는 조건이다.`
-            ].join('\n\n'),
-        highlightNote: isPos
-          ? '상세 설계 선급 승인과 전용 도크 슬롯 배정 완료가 확인됐습니다.'
-          : '기자재 납기 병목에 따른 인도 슬롯 재조정과 공정 대기 비용 조건이 확인됐습니다.'
-      });
+        rate = isPos
+          ? Number(randFloat(0.04, 0.11).toFixed(3))
+          : Number(randFloat(-0.09, -0.04).toFixed(3));
+        reason = isPos ? extraShipTpl.reasonPos : extraShipTpl.reasonNeg;
+
+        paidPair = createSingleArcPaidClue({
+          year: y,
+          stock: shipStock,
+          arcStageLabel,
+          isPositive: isPos,
+          topic: extraShipTpl.topic,
+          subtitle: extraShipTpl.subtitle(variant),
+          postTitle: isPos ? extraShipTpl.postTitlePos : extraShipTpl.postTitleNeg,
+          body: isPos ? extraShipTpl.bodyPos(variant) : extraShipTpl.bodyNeg(variant),
+          highlightNote: isPos ? extraShipTpl.highlightPos : extraShipTpl.highlightNeg
+        });
+      } else {
+        fTitle = `${variant.clientRegion} 장기 선대 협상, 연료 탱크 상세 설계 및 도크 슬롯 조율`;
+        fSum = `국제 선급 상세 설계 승인과 핵심 기자재 납기 조율 현황 점검 (${arcStageLabel})`;
+        fBody = [
+          `장기 협상이 이어지고 있는 ${variant.vesselType} 프로젝트가 친환경 연료 저장탱크 상세 설계와 연도별 도크 건조 슬롯 배정 구간에 들어섰다.`,
+          `선급 기관의 설계 검토와 함께 전용 건조 도크 확보 작업이 병행되고 있으며, 주요 엔진 밸브와 보냉재 협력사의 납기 일정도 함께 점검되고 있다.`,
+          `핵심 기자재 납기 병목이 생기면 선박 인도 슬롯 순서를 다시 조율해야 하는 조건이 남아 있어 본계약 전 공정 안정성 확인이 요구된다.`
+        ].join('\n\n');
+
+        rate = isPos
+          ? Number(randFloat(0.04, 0.11).toFixed(3))
+          : Number(randFloat(-0.09, -0.04).toFixed(3));
+        reason = isPos
+          ? '친환경 선박 추진 계통 상세 설계 승인 및 도크 슬롯 배정 완료가 반영됐습니다.'
+          : '선박 기자재 납기 조율 및 후판 원가 부담이 반영됐습니다.';
+
+        paidPair = createSingleArcPaidClue({
+          year: y,
+          stock: shipStock,
+          arcStageLabel,
+          isPositive: isPos,
+          topic: '친환경 선박 상세 설계 및 도크 배정 현황',
+          subtitle: `A조선의 ${variant.vesselType} 상세 설계 승인 및 도크 배정 현황 조사`,
+          postTitle: isPos
+            ? `A조선, 친환경 연료 저장탱크 선급 승인 완료 및 전용 도크 슬롯 배정`
+            : `A조선, 핵심 엔진 기자재 납기 지연으로 선박 인도 슬롯 재조정 협의`,
+          body: isPos
+            ? [
+                `A 조선이 ${variant.vesselType}의 친환경 연료 저장탱크 상세 설계에 대해 국제 선급 기관의 승인을 마쳤다.`,
+                `설계 승인과 함께 연속 건조를 위한 전용 도크 슬롯 배정도 마무리돼 건조 준비 공정이 계획대로 정리됐다.`,
+                `다만 최종 본계약 체결 여부는 선주 측 이사회 승인과 금융 보증 최종 확정을 거쳐 결정된다.`
+              ].join('\n\n')
+            : [
+                `친환경 엔진에 들어가는 핵심 밸브와 보냉재 납기가 길어지면서 A 조선의 건조 공정 일정 조정이 불가피해졌다.`,
+                `A 조선은 선주 측과 선박 인도 슬롯 순서를 다시 조율하고 있으며, 일부 공정 대기 비용이 추가로 발생하고 있다.`,
+                `기자재 납기 정상화와 추가 원가 분담 합의가 남아 있는 조건이다.`
+              ].join('\n\n'),
+          highlightNote: isPos
+            ? '상세 설계 선급 승인과 전용 도크 슬롯 배정 완료가 확인됐습니다.'
+            : '기자재 납기 병목에 따른 인도 슬롯 재조정과 공정 대기 비용 조건이 확인됐습니다.'
+        });
+      }
     } else {
       fTitle = `${variant.clientRegion} ${variant.vesselType} 장기 공급안, 선주 연말 이사회 상정`;
       fSum = `${durationYears}년 장기 협상의 최종 이사회 의결 시점과 막바지 선가·보증 조건 점검 (${durationYears}/${durationYears} 최종 단계)`;
@@ -1675,9 +1768,11 @@ function generateShipMultiYearArc({ startYear, durationYears, finalMode }) {
     }
 
     // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
-    const shipStageType = getArcStageType(step, durationYears);
-    fBody = extendArcFreeBody('ship', shipStageType, fBody);
-    extendArcPaidList('ship', 'a_ship', shipStageType, isPos, paidPair);
+    if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.ship[step - 2])) {
+      const shipStageType = getArcStageType(step, durationYears);
+      fBody = extendArcFreeBody('ship', shipStageType, fBody);
+      extendArcPaidList('ship', 'a_ship', shipStageType, isPos, paidPair);
+    }
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -1916,78 +2011,117 @@ function generateSemiMultiYearArc({ startYear, durationYears, finalSuccess }) {
     } else if (!isLast) {
       const midGood = (step % 2 === 1) ? true : finalSuccess;
       const bGood = !midGood;
+      const extraSemiTpl = EXTRA_ARC_MIDDLE_STAGES.semi[step - 2] || null;
 
-      fTitle = `${variant.fabName}, 후공정 패키징 라인 연동 및 고객사 물량 협의`;
-      fSum = `전공정·패키징 통합 테스트 수율과 추가 장비 수주 공백 여부 점검 (${arcStageLabel})`;
-      fBody = [
-        `증설 중인 ${variant.fabName}이 전공정 웨이퍼 라인과 후공정 첨단 패키징 라인을 연동하는 통합 테스트 구간에 들어섰다.`,
-        `제조사는 서버 고객사들과 선주문 물량 협의를 병행하고 있으며, 장비 협력사들은 패키징 연동용 추가 장비 발주 여부를 확인하고 있다.`,
-        `실리콘 인터포저 기판 수급 병목이나 주력 전공정 장비 납품 종료 후 단기 발주 공백이 발생할 수 있는 조건이 남아 있다.`
-      ].join('\n\n');
+      if (extraSemiTpl) {
+        fTitle = extraSemiTpl.freeTitle(variant);
+        fSum = extraSemiTpl.freeSummary(arcStageLabel);
+        fBody = extraSemiTpl.freeBody(variant);
 
-      aPos = midGood;
-      aRate = midGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.09, -0.04).toFixed(3));
-      aReason = midGood
-        ? '첨단 패키징 연동 수율 안정화 및 서버 고객사 선주문 협의가 반영됐습니다.'
-        : '후공정 패키징 기판 수급 병목 및 시운전 비용이 반영됐습니다.';
+        aPos = midGood;
+        aRate = midGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.09, -0.04).toFixed(3));
+        aReason = midGood ? extraSemiTpl.aReasonPos : extraSemiTpl.aReasonNeg;
 
-      aPair = createSingleArcPaidClue({
-        year: y,
-        stock: aSemiStock,
-        arcStageLabel,
-        isPositive: aPos,
-        topic: '패키징 라인 연동 및 고객사 협의 현황',
-        subtitle: `A반도체의 후공정 패키징 연동 수율 및 고객사 협의 현황 조사`,
-        postTitle: midGood
-          ? `A반도체, 전공정-패키징 통합 시험 수율 목표치 도달 및 서버 고객사 물량 예약`
-          : `A반도체, 패키징용 인터포저 기판 수급 병목으로 통합 시운전 대기 비용 증가`,
-        body: midGood
-          ? [
-              `A 반도체가 신규 웨이퍼 라인과 후공정 패키징 공정을 연결한 통합 테스트에서 내부 목표 수율에 도달했다.`,
-              `이에 따라 주요 서버 고객사들과 선주문 물량 배정 협의를 진행하며 양산 준비를 이어가고 있다.`,
-              `최종 연간 공급 물량과 가동률은 본격 양산 전환 시점에 확정된다.`
-            ].join('\n\n')
-          : [
-              `첨단 패키징에 필수적인 실리콘 인터포저 기판의 외부 조달이 지연되면서 A 반도체의 통합 시운전 일정이 늦어지고 있다.`,
-              `기판 수급 병목이 해소될 때까지 신규 라인의 대기 비용과 시운전 유지비가 추가로 발생하는 구조다.`,
-              `대체 기판 공급처 인증이 완료되기 전까지 양산 전환 준비에 제약이 남아 있다.`
-            ].join('\n\n'),
-        highlightNote: midGood
-          ? '통합 패키징 시험 수율 목표 도달과 서버 고객사 물량 예약 협의가 확인됐습니다.'
-          : '패키징 기판 조달 병목에 따른 시운전 대기 비용 조건이 확인됐습니다.'
-      });
+        aPair = createSingleArcPaidClue({
+          year: y,
+          stock: aSemiStock,
+          arcStageLabel,
+          isPositive: aPos,
+          topic: extraSemiTpl.aTopic,
+          subtitle: extraSemiTpl.aSubtitle(variant),
+          postTitle: midGood ? extraSemiTpl.aPostTitlePos : extraSemiTpl.aPostTitleNeg,
+          body: midGood ? extraSemiTpl.aBodyPos() : extraSemiTpl.aBodyNeg(),
+          highlightNote: midGood ? extraSemiTpl.aHighlightPos : extraSemiTpl.aHighlightNeg
+        });
 
-      bPos = bGood;
-      bRate = bGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.08, -0.03).toFixed(3));
-      bReason = bGood
-        ? '첨단 패키징용 접합·식각 장비 추가 납품이 반영됐습니다.'
-        : '주력 장비 납품 이후 후속 발주 대기 구간 진입이 반영됐습니다.';
+        bPos = bGood;
+        bRate = bGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.08, -0.03).toFixed(3));
+        bReason = bGood ? extraSemiTpl.bReasonPos : extraSemiTpl.bReasonNeg;
 
-      bPair = createSingleArcPaidClue({
-        year: y,
-        stock: bSemiStock,
-        arcStageLabel,
-        isPositive: bPos,
-        topic: '패키징용 추가 장비 수주 및 납품 현황',
-        subtitle: `B반도체의 후공정·패키징 연동 장비 추가 수주 현황 조사`,
-        postTitle: bGood
-          ? `B반도체, 패키징 연동용 TSV 식각·세정 장비 추가 수주 및 연내 납품 진행`
-          : `B반도체, 주력 전공정 장비 납품 일단락… 차기 발주까지 단기 수주 공백 구간`,
-        body: bGood
-          ? [
-              `B 반도체가 고객사의 후공정 패키징 라인 확장에 맞춰 실리콘관통전극(TSV) 식각 및 세정 장비 추가 물량을 수주했다.`,
-              `추가 수주 물량은 올해 안에 순차 납품이 진행되며 기존 전공정 공급 종료에 따른 공백을 메우고 있다.`,
-              `후속 업그레이드 발주는 고객사의 최종 양산 가동률 확인 이후 결정된다.`
-            ].join('\n\n')
-          : [
-              `B 반도체의 전공정 주력 장비 납품이 일단락되면서 고객사의 최종 양산 전환 전까지 신규 발주가 일시적으로 비는 구간에 들어섰다.`,
-              `추가 장비 수주 없이 기존 유지보수 인력과 설비 고정비가 유지되는 구조다.`,
-              `고객사의 차기 라인 증설 결정이 내려지기 전까지 수주 공백이 이어질 조건이 남아 있다.`
-            ].join('\n\n'),
-        highlightNote: bGood
-          ? '패키징 공정용 추가 장비 수주와 연내 납품 일정이 확인됐습니다.'
-          : '주력 물량 납품 종료 후 차기 발주까지 단기 수주 공백 구간임이 확인됐습니다.'
-      });
+        bPair = createSingleArcPaidClue({
+          year: y,
+          stock: bSemiStock,
+          arcStageLabel,
+          isPositive: bPos,
+          topic: extraSemiTpl.bTopic,
+          subtitle: extraSemiTpl.bSubtitle(),
+          postTitle: bGood ? extraSemiTpl.bPostTitlePos : extraSemiTpl.bPostTitleNeg,
+          body: bGood ? extraSemiTpl.bBodyPos() : extraSemiTpl.bBodyNeg(),
+          highlightNote: bGood ? extraSemiTpl.bHighlightPos : extraSemiTpl.bHighlightNeg
+        });
+      } else {
+        fTitle = `${variant.fabName}, 후공정 패키징 라인 연동 및 고객사 물량 협의`;
+        fSum = `전공정·패키징 통합 테스트 수율과 추가 장비 수주 공백 여부 점검 (${arcStageLabel})`;
+        fBody = [
+          `증설 중인 ${variant.fabName}이 전공정 웨이퍼 라인과 후공정 첨단 패키징 라인을 연동하는 통합 테스트 구간에 들어섰다.`,
+          `제조사는 서버 고객사들과 선주문 물량 협의를 병행하고 있으며, 장비 협력사들은 패키징 연동용 추가 장비 발주 여부를 확인하고 있다.`,
+          `실리콘 인터포저 기판 수급 병목이나 주력 전공정 장비 납품 종료 후 단기 발주 공백이 발생할 수 있는 조건이 남아 있다.`
+        ].join('\n\n');
+
+        aPos = midGood;
+        aRate = midGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.09, -0.04).toFixed(3));
+        aReason = midGood
+          ? '첨단 패키징 연동 수율 안정화 및 서버 고객사 선주문 협의가 반영됐습니다.'
+          : '후공정 패키징 기판 수급 병목 및 시운전 비용이 반영됐습니다.';
+
+        aPair = createSingleArcPaidClue({
+          year: y,
+          stock: aSemiStock,
+          arcStageLabel,
+          isPositive: aPos,
+          topic: '패키징 라인 연동 및 고객사 협의 현황',
+          subtitle: `A반도체의 후공정 패키징 연동 수율 및 고객사 협의 현황 조사`,
+          postTitle: midGood
+            ? `A반도체, 전공정-패키징 통합 시험 수율 목표치 도달 및 서버 고객사 물량 예약`
+            : `A반도체, 패키징용 인터포저 기판 수급 병목으로 통합 시운전 대기 비용 증가`,
+          body: midGood
+            ? [
+                `A 반도체가 신규 웨이퍼 라인과 후공정 패키징 공정을 연결한 통합 테스트에서 내부 목표 수율에 도달했다.`,
+                `이에 따라 주요 서버 고객사들과 선주문 물량 배정 협의를 진행하며 양산 준비를 이어가고 있다.`,
+                `최종 연간 공급 물량과 가동률은 본격 양산 전환 시점에 확정된다.`
+              ].join('\n\n')
+            : [
+                `첨단 패키징에 필수적인 실리콘 인터포저 기판의 외부 조달이 지연되면서 A 반도체의 통합 시운전 일정이 늦어지고 있다.`,
+                `기판 수급 병목이 해소될 때까지 신규 라인의 대기 비용과 시운전 유지비가 추가로 발생하는 구조다.`,
+                `대체 기판 공급처 인증이 완료되기 전까지 양산 전환 준비에 제약이 남아 있다.`
+              ].join('\n\n'),
+          highlightNote: midGood
+            ? '통합 패키징 시험 수율 목표 도달과 서버 고객사 물량 예약 협의가 확인됐습니다.'
+            : '패키징 기판 조달 병목에 따른 시운전 대기 비용 조건이 확인됐습니다.'
+        });
+
+        bPos = bGood;
+        bRate = bGood ? Number(randFloat(0.05, 0.12).toFixed(3)) : Number(randFloat(-0.08, -0.03).toFixed(3));
+        bReason = bGood
+          ? '첨단 패키징용 접합·식각 장비 추가 납품이 반영됐습니다.'
+          : '주력 장비 납품 이후 후속 발주 대기 구간 진입이 반영됐습니다.';
+
+        bPair = createSingleArcPaidClue({
+          year: y,
+          stock: bSemiStock,
+          arcStageLabel,
+          isPositive: bPos,
+          topic: '패키징용 추가 장비 수주 및 납품 현황',
+          subtitle: `B반도체의 후공정·패키징 연동 장비 추가 수주 현황 조사`,
+          postTitle: bGood
+            ? `B반도체, 패키징 연동용 TSV 식각·세정 장비 추가 수주 및 연내 납품 진행`
+            : `B반도체, 주력 전공정 장비 납품 일단락… 차기 발주까지 단기 수주 공백 구간`,
+          body: bGood
+            ? [
+                `B 반도체가 고객사의 후공정 패키징 라인 확장에 맞춰 실리콘관통전극(TSV) 식각 및 세정 장비 추가 물량을 수주했다.`,
+                `추가 수주 물량은 올해 안에 순차 납품이 진행되며 기존 전공정 공급 종료에 따른 공백을 메우고 있다.`,
+                `후속 업그레이드 발주는 고객사의 최종 양산 가동률 확인 이후 결정된다.`
+              ].join('\n\n')
+            : [
+                `B 반도체의 전공정 주력 장비 납품이 일단락되면서 고객사의 최종 양산 전환 전까지 신규 발주가 일시적으로 비는 구간에 들어섰다.`,
+                `추가 장비 수주 없이 기존 유지보수 인력과 설비 고정비가 유지되는 구조다.`,
+                `고객사의 차기 라인 증설 결정이 내려지기 전까지 수주 공백이 이어질 조건이 남아 있다.`
+              ].join('\n\n'),
+          highlightNote: bGood
+            ? '패키징 공정용 추가 장비 수주와 연내 납품 일정이 확인됐습니다.'
+            : '주력 물량 납품 종료 후 차기 발주까지 단기 수주 공백 구간임이 확인됐습니다.'
+        });
+      }
     } else {
       fTitle = `${variant.fabName}, 연말 양산 전환 일정 및 글로벌 서버 물량 배정 협의`;
       fSum = `${durationYears}년 신규 메모리 라인의 양산 전환 시점과 감가상각·재고 조정 조건 점검 (${durationYears}/${durationYears} 최종 단계)`;
@@ -2063,10 +2197,12 @@ function generateSemiMultiYearArc({ startYear, durationYears, finalSuccess }) {
     }
 
     // 플레이 피드백: 기사 본문 보강 (단계별 구체 사실 1문장 추가)
-    const semiStageType = getArcStageType(step, durationYears);
-    fBody = extendArcFreeBody('semi', semiStageType, fBody);
-    extendArcPaidList('semi', 'a_semi', semiStageType, aPos, aPair);
-    extendArcPaidList('semi', 'b_semi', semiStageType, bPos, bPair);
+    if (!(step >= 3 && !isLast && EXTRA_ARC_MIDDLE_STAGES.semi[step - 2])) {
+      const semiStageType = getArcStageType(step, durationYears);
+      fBody = extendArcFreeBody('semi', semiStageType, fBody);
+      extendArcPaidList('semi', 'a_semi', semiStageType, aPos, aPair);
+      extendArcPaidList('semi', 'b_semi', semiStageType, bPos, bPair);
+    }
 
     stagesByYear[y] = {
       stepIndex: stageNum,
@@ -2180,8 +2316,8 @@ function generateDynamicScenario(excludedSignatures = []) {
   pricesByYear[2010] = {};
   for (const stock of STOCKS) {
     const [minP, maxP] = stock.basePriceRange;
-    const steps = Math.floor((maxP - minP) / 500);
-    pricesByYear[2010][stock.id] = minP + randInt(0, steps) * 500;
+    const steps = Math.floor((maxP - minP) / 500000);
+    pricesByYear[2010][stock.id] = minP + randInt(0, steps) * 500000;
   }
 
   // 2011년 첫 개장 시세 생성 (상승 4~6종목, 하락 4~6종목 혼합)
@@ -2196,16 +2332,20 @@ function generateDynamicScenario(excludedSignatures = []) {
     const absRate = randFloat(0.04, 0.18);
     const signedRate = isUp ? absRate : -absRate;
     const prevP = pricesByYear[2010][stock.id];
-    let nextP = Math.max(1, Math.round((prevP * (1 + signedRate)) / 10) * 10);
+    let nextP = Math.max(1000, Math.round((prevP * (1 + signedRate)) / 10000) * 10000);
     if (nextP === prevP) {
-      nextP = isUp ? prevP + 500 : Math.max(1, prevP - 500);
+      nextP = isUp ? prevP + 500000 : Math.max(1000, prevP - 500000);
     }
     pricesByYear[2011][stock.id] = nextP;
     const reasonPool = isUp ? OPENING_2011_REASONS[stock.id].up : OPENING_2011_REASONS[stock.id].down;
     openingReasonsByYear[2011][stock.id] = pickOne(reasonPool);
   }
 
-  const lastUsedEventKeyByStock = {};
+  // 한 판(2011~2019년, 9개 거래 연도) 동안 종목별로 이미 사용된 단년 사건(eventKey)을 추적하여 같은 판 안에서 동일한 기사가 다시 나오지 않도록 보장
+  const usedEventKeysByStock = {};
+  for (const stock of STOCKS) {
+    usedEventKeysByStock[stock.id] = new Set();
+  }
 
   // 2011~2019년 거래 연도별 장기 아크 단계(선택형 유료 단서 2종) + 단년 사건(유료 단서 1종) 결합
   for (let tradeYear = 2011; tradeYear <= 2019; tradeYear++) {
@@ -2214,6 +2354,7 @@ function generateDynamicScenario(excludedSignatures = []) {
     openingReasonsByYear[openingYear] = {};
 
     const yearOutcomesByStock = {};
+    const chosenTplByStock = {};
     const arcFreeArticles = [];
     const singleFreeArticles = [];
 
@@ -2248,18 +2389,29 @@ function generateDynamicScenario(excludedSignatures = []) {
       if (yearOutcomesByStock[stock.id]) continue;
 
       const templates = SINGLE_YEAR_TEMPLATES[stock.id];
-      const nonRepeatedTpls = templates.filter((t) => t.eventKey !== lastUsedEventKeyByStock[stock.id]);
-      const tpl = pickOne(nonRepeatedTpls.length > 0 ? nonRepeatedTpls : templates);
-      lastUsedEventKeyByStock[stock.id] = tpl.eventKey;
+      const usedSet = usedEventKeysByStock[stock.id];
+      const unusedInThisGame = templates.filter((t) => !usedSet.has(t.eventKey));
+      const candidateTpls = unusedInThisGame.length > 0 ? unusedInThisGame : templates;
+      // 이전 판들에서 아직 안 나왔던 사건을 우선 선택
+      const unplayedAcrossGames = candidateTpls.filter(
+        (t) => !excludedSet.has(`event:${stock.id}:${t.eventKey}`)
+      );
+      const tpl = pickOne(unplayedAcrossGames.length > 0 ? unplayedAcrossGames : candidateTpls);
+      usedSet.add(tpl.eventKey);
+      chosenTplByStock[stock.id] = tpl;
 
       const unvisited = tpl.outcomes.filter(
-        (o) => !excludedSet.has(`${tradeYear}:${stock.id}:${o.outcomeId}`)
+        (o) =>
+          !excludedSet.has(`${tradeYear}:${stock.id}:${o.outcomeId}`) &&
+          !excludedSet.has(`${stock.id}:${o.outcomeId}`)
       );
       const chosenOutcome = pickOne(unvisited.length > 0 ? unvisited : tpl.outcomes);
       const [minR, maxR] = chosenOutcome.rateRange;
       const rate = Number(randFloat(minR, maxR).toFixed(3));
       const sig = `${tradeYear}:${stock.id}:${chosenOutcome.outcomeId}`;
       eventSignatures.push(sig);
+      eventSignatures.push(`${stock.id}:${chosenOutcome.outcomeId}`);
+      eventSignatures.push(`event:${stock.id}:${tpl.eventKey}`);
 
       const singleFreeObj = {
         id: `free_${tradeYear}_${stock.id}`,
@@ -2316,6 +2468,7 @@ function generateDynamicScenario(excludedSignatures = []) {
     }
 
     // 한 해에 상승 종목과 하락 종목이 모두 최소 3개 이상 섞이도록 보정
+    // 주의: 이미 해당 연도에 배정된 사건(chosenTplByStock[stockId]) 안에서만 양/음 결과를 전환하여 첫 번째 템플릿으로 덮어써지는 중복을 방지
     const allIds = STOCKS.map((s) => s.id);
     const posIds = allIds.filter((id) => yearOutcomesByStock[id].rate > 0);
     const negIds = allIds.filter((id) => yearOutcomesByStock[id].rate < 0);
@@ -2334,7 +2487,7 @@ function generateDynamicScenario(excludedSignatures = []) {
       const flipTargets = shuffle(singleStockIds).slice(0, deficit);
 
       for (const stockId of flipTargets) {
-        const tpl = SINGLE_YEAR_TEMPLATES[stockId][0];
+        const tpl = chosenTplByStock[stockId] || SINGLE_YEAR_TEMPLATES[stockId][0];
         const desired = tpl.outcomes.find((o) => o.isPositive === needPos);
         if (desired) {
           const [minR, maxR] = desired.rateRange;
@@ -2380,9 +2533,9 @@ function generateDynamicScenario(excludedSignatures = []) {
     for (const stock of STOCKS) {
       const prevPrice = pricesByYear[tradeYear][stock.id];
       const outcome = yearOutcomesByStock[stock.id];
-      let nextPrice = Math.max(1, Math.round(prevPrice * (1 + outcome.rate)));
+      let nextPrice = Math.max(1000, Math.round((prevPrice * (1 + outcome.rate)) / 1000) * 1000);
       if (nextPrice === prevPrice) {
-        nextPrice = outcome.rate >= 0 ? prevPrice + 100 : Math.max(1, prevPrice - 100);
+        nextPrice = outcome.rate >= 0 ? prevPrice + 100000 : Math.max(1000, prevPrice - 100000);
       }
       pricesByYear[openingYear][stock.id] = nextPrice;
       openingReasonsByYear[openingYear][stock.id] = outcome.reason;
@@ -2434,40 +2587,40 @@ function createVerificationScenarioP7() {
     },
     pricesByYear: {
       2010: {
-        a_bio: 22000,
-        b_bio: 19000,
-        a_enter: 18500,
-        b_enter: 15000,
-        a_semi: 32000,
-        b_semi: 23000,
-        a_food: 10500,
-        a_game: 13000,
-        a_ship: 19000,
-        a_air: 16000
+        a_bio: 22000000,
+        b_bio: 19000000,
+        a_enter: 18500000,
+        b_enter: 15000000,
+        a_semi: 32000000,
+        b_semi: 23000000,
+        a_food: 10500000,
+        a_game: 13000000,
+        a_ship: 19000000,
+        a_air: 16000000
       },
       2011: {
-        a_bio: 24000,
-        b_bio: 18000,
-        a_enter: 20000,
-        b_enter: 16000,
-        a_semi: 30000,
-        b_semi: 25000,
-        a_food: 10000,
-        a_game: 14000,
-        a_ship: 22000,
-        a_air: 15000
+        a_bio: 24000000,
+        b_bio: 18000000,
+        a_enter: 20000000,
+        b_enter: 16000000,
+        a_semi: 30000000,
+        b_semi: 25000000,
+        a_food: 10000000,
+        a_game: 14000000,
+        a_ship: 22000000,
+        a_air: 15000000
       },
       2012: {
-        a_bio: 26400,
-        b_bio: 17460,
-        a_enter: 22000,
-        b_enter: 15680,
-        a_semi: 28500,
-        b_semi: 28000,
-        a_food: 10800,
-        a_game: 13020,
-        a_ship: 22660,
-        a_air: 15600
+        a_bio: 26400000,
+        b_bio: 17460000,
+        a_enter: 22000000,
+        b_enter: 15680000,
+        a_semi: 28500000,
+        b_semi: 28000000,
+        a_food: 10800000,
+        a_game: 13020000,
+        a_ship: 22660000,
+        a_air: 15600000
       }
     },
     openingReasonsByYear: {

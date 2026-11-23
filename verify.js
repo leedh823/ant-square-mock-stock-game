@@ -1016,15 +1016,28 @@ async function runVerification() {
   // ---------------------------------------------------------------------------
   // 8. 플레이 피드백 반영 검증 (기사 콘텐츠 품질, 25% 가격 인상, 15초 경고, 채팅 알림, BGM)
   // ---------------------------------------------------------------------------
-  // (a) 신규 동적 시나리오 생성 후 전 연도 무료 기사 & 유료 단서의 다문단 구조(2~3문단) 및 미래 상승·하락·확정 등락률 금지 검사
+  // (a) 신규 동적 시나리오 생성 후 전 연도 무료 기사 & 유료 단서의 다문단 구조(2~3문단), 미래 상승·하락·확정 등락률 금지, 그리고 연도 간 기사 중복 0건 검사
   const freshScenario = generateDynamicScenario([]);
   await prewarmScenarioArticles({ scenario: freshScenario });
   let checkedFreeCount = 0;
   let checkedPaidCount = 0;
+  const seenFreeTitles = new Map();
+  const seenFreeBodies = new Map();
+  const seenPaidKeys = new Map();
   for (let y = 2011; y <= 2019; y++) {
     const yd = freshScenario.articlesByYear[y];
     for (const f of yd.free || []) {
       checkedFreeCount++;
+      assert.ok(
+        !seenFreeTitles.has(f.title),
+        `[${y}년 무료 기사 ${f.id}] 무료 기사 제목이 ${seenFreeTitles.get(f.title)}년과 중복되면 안 됩니다: "${f.title}"`
+      );
+      seenFreeTitles.set(f.title, y);
+      assert.ok(
+        !seenFreeBodies.has(f.body),
+        `[${y}년 무료 기사 ${f.id}] 무료 기사 본문이 ${seenFreeBodies.get(f.body)}년과 중복되면 안 됩니다.`
+      );
+      seenFreeBodies.set(f.body, y);
       const paras = String(f.body || '').split(/\n{2,}/).filter(Boolean);
       assert.ok(paras.length >= 2 && paras.length <= 3, `[${y}년 무료 기사 ${f.id}] 본문은 2~3개의 짧은 문단이어야 합니다. (실제: ${paras.length})`);
       for (const field of [f.title, f.summary, f.body]) {
@@ -1034,6 +1047,12 @@ async function runVerification() {
     }
     for (const p of yd.paid || []) {
       checkedPaidCount++;
+      const paidKey = `${p.stockId}::${p.clueType || 'single'}::${p.postTitle}::${p.body}`;
+      assert.ok(
+        !seenPaidKeys.has(paidKey),
+        `[${y}년 유료 단서 ${p.id}] 유료 단서(${p.stockName})가 ${seenPaidKeys.get(paidKey)}년과 중복되면 안 됩니다: "${p.postTitle}"`
+      );
+      seenPaidKeys.set(paidKey, y);
       const paras = String(p.body || '').split(/\n{2,}/).filter(Boolean);
       assert.ok(paras.length >= 2 && paras.length <= 3, `[${y}년 유료 단서 ${p.id}] 본문은 2~3개의 짧은 문단이어야 합니다. (실제: ${paras.length})`);
       for (const field of [p.preTitle, p.whatItTells, p.subtitle, p.postTitle, p.body, p.highlightNote]) {
@@ -1059,25 +1078,30 @@ async function runVerification() {
   );
   assert.strictEqual(predictiveTitleReject.valid, false, '외부 AI 경로에서도 급등 기대 등 결과 추정 제목은 차단되어야 합니다.');
 
-  // (b) 유료 기사 가격 25% 인상 설정값 및 공통 가격 계산 공식 검증
+  // (b) 유료 기사 가격 25% 인상 설정값 및 공통 가격 계산 공식 검증 (금액 단위 1,000배 확장: 000 추가 반영)
+  assert.strictEqual(CONFIG.INITIAL_CASH, 500000000);
+  assert.strictEqual(CONFIG.ANNUAL_GRANT, 50000000);
   assert.strictEqual(CONFIG.ARTICLE_PRICE_RATE, 0.02);
   assert.strictEqual(CONFIG.ARTICLE_PRICE_INCREASE_RATE, 0.25);
   assert.strictEqual(
-    calculateArticlePrice([550000, 550000, 550000]),
-    13000,
-    '총자산 중앙값 550,000원 기준 현행 2% 대비 25% 인상(2.5% = 13,750원 -> 1,000원 단위 내림)은 13,000원이어야 합니다.'
+    calculateArticlePrice([550000000, 550000000, 550000000]),
+    13000000,
+    '총자산 중앙값 550,000,000원 기준 현행 2% 대비 25% 인상(2.5% = 13,750,000원 -> 1,000,000원 단위 내림)은 13,000,000원이어야 합니다.'
   );
   assert.strictEqual(
-    calculateArticlePrice([1000000, 1000000]),
-    25000,
-    '총자산 중앙값 1,000,000원 기준 2.5%는 25,000원이어야 합니다.'
+    calculateArticlePrice([1000000000, 1000000000]),
+    25000000,
+    '총자산 중앙값 1,000,000,000원 기준 2.5%는 25,000,000원이어야 합니다.'
   );
 
-  // (c) 15초 경고, 채팅 알림, BGM 컨트롤 마크업 및 오디오 파일 서빙 검증
+  // (c) 30초 경고, 채팅 알림, BGM 컨트롤, 비율형 주문 수량 버튼(10% / 25% / 50% / 전체), 이용자 수 통계(/api/stats) 검증
   assert.ok(htmlStr.includes('id="trading-15s-warning-banner"'));
   assert.ok(htmlStr.includes('거래 마감까지 30초 남았어요'));
   assert.ok(jsStr.includes('remainingMs <= 30000'), '마감 경고는 남은 시간 30초 이하에서 표시되어야 합니다.');
   assert.ok(!jsStr.includes('activeClue.highlightNote') && !jsStr.includes('pArt.highlightNote'), '기사 본문 아래 요약 정리 박스는 표시하지 않아야 합니다.');
+  assert.ok(htmlStr.includes('data-qty-pct="10"') && htmlStr.includes('data-qty-pct="25"') && htmlStr.includes('data-qty-pct="50"') && htmlStr.includes('data-qty-pct="100"'));
+  assert.ok(htmlStr.includes('>10%<') && htmlStr.includes('>25%<') && htmlStr.includes('>50%<') && htmlStr.includes('>전체<'));
+  assert.ok(htmlStr.includes('id="entry-user-stats-pill"'));
   assert.ok(htmlStr.includes('id="mobile-tab-chat-badge"'));
   assert.ok(htmlStr.includes('id="chat-all-unread-badge"'));
   assert.ok(htmlStr.includes('id="btn-bgm-toggle"'));
@@ -1085,15 +1109,23 @@ async function runVerification() {
   assert.ok(jsStr.includes('markActiveChatChannelAsRead'));
   assert.ok(jsStr.includes('ant_square_bgm_enabled_v1'));
 
+  const statsRes = await request('GET', '/api/stats');
+  assert.strictEqual(statsRes.statusCode, 200);
+  assert.strictEqual(statsRes.json.ok, true);
+  assert.ok(statsRes.json.cumulative.totalHumanParticipations >= 6, '누적 이용자(참가) 수가 집계되어야 합니다.');
+  assert.ok(statsRes.json.cumulative.totalGamesStarted >= 2, '누적 시작된 게임 수가 집계되어야 합니다.');
+
   const bgmRes = await request('GET', '/audio/bgm-ambient.wav');
   assert.strictEqual(bgmRes.statusCode, 200);
   assert.strictEqual(bgmRes.headers['Content-Type'], 'audio/wav');
   assert.strictEqual(bgmRes.body.slice(0, 4).toString('ascii'), 'RIFF');
   assert.strictEqual(bgmRes.body.slice(8, 12).toString('ascii'), 'WAVE');
 
-  console.log(`\n[통과] 8. 플레이 피드백 5종 자동 검증 완료:`);
-  console.log(`   · 기사 품질 검사: 무료 기사 ${checkedFreeCount}건 + 유료 단서 ${checkedPaidCount}건 전수 2~3문단 구조 및 결과 추정/등락률 누출 0건`);
-  console.log(`   · 유료 기사 가격: 기준 비율 ${(CONFIG.ARTICLE_PRICE_RATE * 100).toFixed(1)}% + 인상률 ${(CONFIG.ARTICLE_PRICE_INCREASE_RATE * 100).toFixed(0)}% (중앙값 550,000원 -> 13,000원)`);
+  console.log(`\n[통과] 8. 플레이 피드백 5종 및 추가 요청 4종 자동 검증 완료:`);
+  console.log(`   · 기사 품질 & 중복 0건 검사: 무료 기사 ${checkedFreeCount}건 + 유료 단서 ${checkedPaidCount}건 전수 2~3문단 구조, 연도 간 중복 0건, 결과 추정/등락률 누출 0건`);
+  console.log(`   · 자금 및 유료 기사 가격(000 확대): 기초 자금 ${CONFIG.INITIAL_CASH.toLocaleString()}원 / 연간 지원금 ${CONFIG.ANNUAL_GRANT.toLocaleString()}원 / 중앙값 550,000,000원 -> 13,000,000원`);
+  console.log(`   · 주문 수량 비율 버튼: 10% / 25% / 50% / 전체 적용 완료`);
+  console.log(`   · 이용자 수 데이터 집계(/api/stats): 누적 참가 ${statsRes.json.cumulative.totalHumanParticipations}명(고유 닉네임 ${statsRes.json.cumulative.uniqueNicknameCount}명) / 시작 ${statsRes.json.cumulative.totalGamesStarted}판`);
   console.log(`   · BGM 음원 서빙: /audio/bgm-ambient.wav (HTTP 200, audio/wav, ${bgmRes.body.length.toLocaleString()} bytes)`);
 
   // 바이오·조선·반도체 실제 생성된 무료 기사 샘플 출력

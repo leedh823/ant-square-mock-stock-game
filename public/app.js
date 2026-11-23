@@ -3332,24 +3332,22 @@
       renderOrderPanel();
     });
 
-    document.querySelectorAll('.qty-chip[data-qty]').forEach((chip) => {
+    document.querySelectorAll('.qty-chip[data-qty-pct]').forEach((chip) => {
       chip.addEventListener('click', () => {
-        uiState.orderQty = Number(chip.dataset.qty) || 1;
+        if (!appState) return;
+        const stock = appState.stocks.find((s) => s.id === uiState.selectedStockId);
+        if (!stock) return;
+        const pct = Number(chip.dataset.qtyPct) || 0;
+        const maxQty = uiState.orderSide === 'BUY'
+          ? Math.floor(appState.me.cash / stock.currentPrice)
+          : stock.myQuantity;
+        const targetQty = pct >= 100
+          ? maxQty
+          : Math.floor((maxQty * pct) / 100);
+        uiState.orderQty = Math.max(1, targetQty);
         $('input-order-qty').value = String(uiState.orderQty);
         renderOrderPanel();
       });
-    });
-
-    $('btn-qty-max').addEventListener('click', () => {
-      if (!appState) return;
-      const stock = appState.stocks.find((s) => s.id === uiState.selectedStockId);
-      if (!stock) return;
-      const maxQty = uiState.orderSide === 'BUY'
-        ? Math.floor(appState.me.cash / stock.currentPrice)
-        : stock.myQuantity;
-      uiState.orderQty = Math.max(1, maxQty);
-      $('input-order-qty').value = String(uiState.orderQty);
-      renderOrderPanel();
     });
 
     // 주문 실행 버튼
@@ -3443,12 +3441,31 @@
     });
   }
 
+  async function refreshEntryUsageStats() {
+    const pill = $('entry-user-stats-pill');
+    if (!pill) return;
+    try {
+      const res = await fetch('/api/stats');
+      const data = await res.json();
+      if (res.ok && data && data.ok) {
+        const connected = (data.realtime && data.realtime.activeHumanPlayers) || 0;
+        const total = (data.cumulative && data.cumulative.totalHumanParticipations) || 0;
+        const games = (data.cumulative && data.cumulative.totalGamesStarted) || 0;
+        pill.textContent = `현재 ${connected.toLocaleString('ko-KR')}명 · 누적 ${total.toLocaleString('ko-KR')}명 (${games.toLocaleString('ko-KR')}판)`;
+      }
+    } catch (e) {
+      // ignore network error
+    }
+  }
+
   /**
    * 초기 부트스트랩 (기존 세션 자동 복구)
    */
   async function init() {
     bindEvents();
     initBgm();
+    refreshEntryUsageStats();
+    setInterval(refreshEntryUsageStats, 15000);
 
     const saved = loadSession();
     if (saved && saved.roomCode && saved.participantId && saved.token) {

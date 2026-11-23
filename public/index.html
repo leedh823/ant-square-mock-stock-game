@@ -43,7 +43,10 @@
         </span>
         <span class="brand-text">개미광장</span>
       </div>
-      <button type="button" id="btn-open-guide-entry" class="btn-pill-outline">게임 방법</button>
+      <div class="top-bar-right-group">
+        <span id="entry-user-stats-pill" class="status-pill" title="실시간 접속자 및 누적 이용자 수">접속 0명 · 누적 0명</span>
+        <button type="button" id="btn-open-guide-entry" class="btn-pill-outline">게임 방법</button>
+      </div>
     </header>
 
     <div class="entry-layout">
@@ -320,7 +323,7 @@
       <div class="trading-top-right">
         <div class="asset-metric metric-cash">
           <span class="metric-label">거래 가능 현금</span>
-          <strong id="top-available-cash" class="metric-value highlight-cash">500,000원</strong>
+          <strong id="top-available-cash" class="metric-value highlight-cash">500,000,000원</strong>
         </div>
       </div>
     </header>
@@ -395,7 +398,7 @@
               <p id="detail-public-business" class="detail-business">아티스트 기획·공연·음반</p>
 
               <div class="detail-price-row">
-                <strong id="detail-current-price" class="detail-price">20,000원</strong>
+                <strong id="detail-current-price" class="detail-price">20,000,000원</strong>
                 <span id="detail-change-badge" class="detail-change-badge neutral">첫 거래</span>
               </div>
 
@@ -466,11 +469,10 @@
                 </div>
 
                 <div class="qty-quick-row">
-                  <button type="button" class="qty-chip" data-qty="1">1주</button>
-                  <button type="button" class="qty-chip" data-qty="10">10주</button>
-                  <button type="button" class="qty-chip" data-qty="20">20주</button>
-                  <button type="button" class="qty-chip" data-qty="40">40주</button>
-                  <button type="button" id="btn-qty-max" class="qty-chip qty-chip-max">최대 가능 수량</button>
+                  <button type="button" class="qty-chip" data-qty-pct="10">10%</button>
+                  <button type="button" class="qty-chip" data-qty-pct="25">25%</button>
+                  <button type="button" class="qty-chip" data-qty-pct="50">50%</button>
+                  <button type="button" id="btn-qty-max" class="qty-chip qty-chip-max" data-qty-pct="100">전체</button>
                 </div>
 
                 <div class="order-calc-box">
@@ -480,11 +482,11 @@
                   </div>
                   <div class="calc-row">
                     <span>예상 주문 금액</span>
-                    <strong id="calc-order-amount">20,000원</strong>
+                    <strong id="calc-order-amount">20,000,000원</strong>
                   </div>
                   <div class="calc-row">
                     <span>주문 후 현금</span>
-                    <strong id="calc-cash-after">480,000원</strong>
+                    <strong id="calc-cash-after">480,000,000원</strong>
                   </div>
                 </div>
 
@@ -516,7 +518,7 @@
             <div class="portfolio-summary-grid">
               <div class="pf-stat-box">
                 <span class="pf-stat-label">총자산</span>
-                <strong id="pf-total-assets" class="pf-stat-val highlight-mint">500,000원</strong>
+                <strong id="pf-total-assets" class="pf-stat-val highlight-mint">500,000,000원</strong>
               </div>
               <div class="pf-stat-box">
                 <span class="pf-stat-label">직전 순위</span>
@@ -524,7 +526,7 @@
               </div>
               <div class="pf-stat-box">
                 <span class="pf-stat-label">거래 가능 현금</span>
-                <strong id="pf-cash" class="pf-stat-val">500,000원</strong>
+                <strong id="pf-cash" class="pf-stat-val">500,000,000원</strong>
               </div>
               <div class="pf-stat-box">
                 <span class="pf-stat-label">주식 평가액 합계</span>
@@ -585,7 +587,7 @@
 
             <div id="paid-price-banner" class="paid-price-banner hidden">
               <span>올해 유료 단서 공통 가격</span>
-              <strong id="paid-common-price-label">11,000원</strong>
+              <strong id="paid-common-price-label">13,000,000원</strong>
             </div>
 
             <ul id="article-list-ul" class="article-list-ul"></ul>
@@ -814,8 +816,8 @@
       </div>
       <div class="modal-body">
         <ul class="guide-list">
-          <li><strong>기초 및 연간 자금:</strong> 2010년 기초 자금 500,000원으로 시작하며, 2011~2019년 개장마다 연간 지원금 50,000원이 지급됩니다.</li>
-          <li><strong>무료 기사와 유료 단서:</strong> 2010년은 기사 없이 거래합니다. 2011년부터 해마다 무료 기사 5개가 동시에 공개되며, 유료 기사는 올해 공통 가격(지급 후 총자산 중앙값×2%, 1,000원 단위 내림)으로 구매할 수 있습니다.</li>
+          <li><strong>기초 및 연간 자금:</strong> 2010년 기초 자금 500,000,000원으로 시작하며, 2011~2019년 개장마다 연간 지원금 50,000,000원이 지급됩니다.</li>
+          <li><strong>무료 기사와 유료 단서:</strong> 2010년은 기사 없이 거래합니다. 2011년부터 해마다 무료 기사 5개가 동시에 공개되며, 유료 기사는 올해 공통 가격(지급 후 총자산 중앙값×2.5%, 1,000,000원 단위 내림)으로 구매할 수 있습니다.</li>
           <li><strong>시세와 정산:</strong> 한 해의 거래 가격은 고정되며, 다음 해 개장 때 바뀐 주가가 반영됩니다. 개장 순위는 연간 자금 지급 전 총자산으로 계산합니다.</li>
           <li><strong>연도 투자 순손익:</strong> <code>해당 개장 지급 전 총자산 − 직전 연도 지급 후 시작 총자산</code>으로 계산하며 유료 기사 구매 비용이 반영됩니다.</li>
         </ul>

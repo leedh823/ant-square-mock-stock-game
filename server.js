@@ -14,6 +14,152 @@ const { prepareArticlesForYear, prewarmScenarioArticles } = require('./aiArticle
 const rooms = new Map(); // roomCode -> Room
 const sseClients = new Map(); // clientId -> { res, roomCode, participantId }
 
+// 이용자 수 및 게임 플레이 통계 데이터 (메모리 + 로컬 파일 영구 저장)
+const STATS_FILE_PATH = path.join(__dirname, 'usageStats.json');
+
+function loadPersistedUsageStats() {
+  try {
+    if (fs.existsSync(STATS_FILE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(STATS_FILE_PATH, 'utf8'));
+      return {
+        totalRoomsCreated: Number(parsed.totalRoomsCreated) || 0,
+        totalSoloRoomsCreated: Number(parsed.totalSoloRoomsCreated) || 0,
+        totalFriendRoomsCreated: Number(parsed.totalFriendRoomsCreated) || 0,
+        totalHumanParticipations: Number(parsed.totalHumanParticipations) || 0,
+        totalGamesStarted: Number(parsed.totalGamesStarted) || 0,
+        totalGamesCompleted: Number(parsed.totalGamesCompleted) || 0,
+        totalReplays: Number(parsed.totalReplays) || 0,
+        uniqueNicknameList: Array.isArray(parsed.uniqueNicknameList) ? parsed.uniqueNicknameList : [],
+        dailyUsersByDate: parsed.dailyUsersByDate && typeof parsed.dailyUsersByDate === 'object' ? parsed.dailyUsersByDate : {},
+        updatedAt: parsed.updatedAt || Date.now()
+      };
+    }
+  } catch (e) {
+    // ignore read error
+  }
+  return {
+    totalRoomsCreated: 0,
+    totalSoloRoomsCreated: 0,
+    totalFriendRoomsCreated: 0,
+    totalHumanParticipations: 0,
+    totalGamesStarted: 0,
+    totalGamesCompleted: 0,
+    totalReplays: 0,
+    uniqueNicknameList: [],
+    dailyUsersByDate: {},
+    updatedAt: Date.now()
+  };
+}
+
+const usageStats = loadPersistedUsageStats();
+
+function getKstDateString() {
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10);
+}
+
+function saveUsageStats() {
+  usageStats.updatedAt = Date.now();
+  try {
+    fs.writeFileSync(STATS_FILE_PATH, JSON.stringify(usageStats, null, 2), 'utf8');
+  } catch (e) {
+    // 샌드박스나 읽기 전용 환경에서는 메모리 통계만 유지
+  }
+}
+
+function recordUserJoinStats(nickname, isNewRoom = false, mode = 'friend') {
+  if (isNewRoom) {
+    usageStats.totalRoomsCreated += 1;
+    if (mode === 'solo') usageStats.totalSoloRoomsCreated += 1;
+    else usageStats.totalFriendRoomsCreated += 1;
+  }
+  usageStats.totalHumanParticipations += 1;
+  const norm = String(nickname || '').trim();
+  if (norm && !usageStats.uniqueNicknameList.includes(norm)) {
+    usageStats.uniqueNicknameList.push(norm);
+  }
+  const today = getKstDateString();
+  if (!usageStats.dailyUsersByDate[today]) {
+    usageStats.dailyUsersByDate[today] = { participations: 0, roomsCreated: 0, gamesStarted: 0, gamesCompleted: 0 };
+  }
+  usageStats.dailyUsersByDate[today].participations += 1;
+  if (isNewRoom) {
+    usageStats.dailyUsersByDate[today].roomsCreated += 1;
+  }
+  saveUsageStats();
+}
+
+function recordGamePhaseStats(eventType) {
+  const today = getKstDateString();
+  if (!usageStats.dailyUsersByDate[today]) {
+    usageStats.dailyUsersByDate[today] = { participations: 0, roomsCreated: 0, gamesStarted: 0, gamesCompleted: 0 };
+  }
+  if (eventType === 'START') {
+    usageStats.totalGamesStarted += 1;
+    usageStats.dailyUsersByDate[today].gamesStarted += 1;
+  } else if (eventType === 'COMPLETE') {
+    usageStats.totalGamesCompleted += 1;
+    usageStats.dailyUsersByDate[today].gamesCompleted += 1;
+  } else if (eventType === 'REPLAY') {
+    usageStats.totalReplays += 1;
+  }
+  saveUsageStats();
+}
+
+function getUsageStatsSnapshot() {
+  let activeHumanPlayers = 0;
+  let connectedHumanPlayers = 0;
+  let playingRooms = 0;
+  let waitingRooms = 0;
+
+  for (const room of rooms.values()) {
+    if (room.status === 'WAITING') waitingRooms += 1;
+    else playingRooms += 1;
+    for (const p of room.participants.values()) {
+      if (!p.isBot) {
+        activeHumanPlayers += 1;
+        if (p.connected) connectedHumanPlayers += 1;
+      }
+    }
+  }
+
+  const today = getKstDateString();
+  const todayStats = usageStats.dailyUsersByDate[today] || {
+    participations: 0,
+    roomsCreated: 0,
+    gamesStarted: 0,
+    gamesCompleted: 0
+  };
+
+  return {
+    ok: true,
+    realtime: {
+      connectedHumanPlayers,
+      activeHumanPlayers,
+      activeRooms: rooms.size,
+      waitingRooms,
+      playingRooms,
+      activeSseConnections: sseClients.size
+    },
+    cumulative: {
+      totalHumanParticipations: usageStats.totalHumanParticipations,
+      uniqueNicknameCount: usageStats.uniqueNicknameList.length,
+      totalRoomsCreated: usageStats.totalRoomsCreated,
+      totalSoloRoomsCreated: usageStats.totalSoloRoomsCreated,
+      totalFriendRoomsCreated: usageStats.totalFriendRoomsCreated,
+      totalGamesStarted: usageStats.totalGamesStarted,
+      totalGamesCompleted: usageStats.totalGamesCompleted,
+      totalReplays: usageStats.totalReplays
+    },
+    today: {
+      date: today,
+      ...todayStats
+    },
+    dailyHistory: usageStats.dailyUsersByDate,
+    updatedAt: usageStats.updatedAt
+  };
+}
+
 // 종목 ID -> 종목 메타 매핑
 const STOCK_MAP = new Map(STOCKS.map((s) => [s.id, s]));
 
@@ -270,6 +416,7 @@ function createRoom({
   };
 
   rooms.set(code, room);
+  recordUserJoinStats(hostNickname, true, mode);
   // 방 시작 전 시나리오 기사 사전 준비 및 검증 (기획서 13쪽: 기사 준비는 방 시작 전 또는 전년도 거래 중에 수행)
   prewarmScenarioArticles(room).catch(() => {});
   return { room, host };
@@ -307,6 +454,7 @@ function startTutorialPhase(room) {
   room.phaseStartedAt = Date.now();
   room.phaseEndsAt = room.phaseStartedAt + CONFIG.DURATION_TUTORIAL_SEC * 1000;
   resetParticipantsReady(room);
+  recordGamePhaseStats('START');
   broadcastRoomState(room);
 }
 
@@ -494,6 +642,7 @@ function transitionFromTradingToNextYear(room) {
     room.status = 'SETTLEMENT';
     room.settlementResult = openingSnapshot;
     room.phaseEndsAt = null;
+    recordGamePhaseStats('COMPLETE');
   } else {
     room.status = 'OPENING';
     if (nextYear === CONFIG.MILESTONE_OPENING_YEAR && CONFIG.HOLD_AT_2012_OPENING) {
@@ -1139,8 +1288,8 @@ function buildParticipantTradeReviews(room, participant) {
 
     const impactScore =
       act.amount * (1 + absRate / 15) +
-      (boughtPaidBeforeOrder ? 120000 : 0) +
-      (inArc ? 80000 : 0);
+      (boughtPaidBeforeOrder ? 120000000 : 0) +
+      (inArc ? 80000000 : 0);
 
     return { act, impactScore };
   });
@@ -1802,14 +1951,19 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(parsedUrl.pathname);
 
-  // 0. 클라우드 배포(Render, Railway 등) 헬스체크 엔드포인트
+  // 0. 클라우드 배포(Render, Railway 등) 헬스체크 엔드포인트 및 이용자 수 통계 엔드포인트
   if (req.method === 'GET' && (pathname === '/api/health' || pathname === '/healthz')) {
     return sendJson(res, 200, {
       ok: true,
       status: 'healthy',
       activeRooms: rooms.size,
+      stats: getUsageStatsSnapshot(),
       timestamp: Date.now()
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/stats') {
+    return sendJson(res, 200, getUsageStatsSnapshot());
   }
 
   // 1. SSE 실시간 이벤트 스트림
@@ -1976,6 +2130,7 @@ const server = http.createServer(async (req, res) => {
         isBot: false
       });
       room.participants.set(newParticipant.id, newParticipant);
+      recordUserJoinStats(nickCheck.nickname, false, room.mode);
 
       broadcastRoomState(room);
 
@@ -2234,6 +2389,7 @@ const server = http.createServer(async (req, res) => {
         if (!m.gameNumber) m.gameNumber = room.gameNumber || 1;
       }
       room.gameNumber = (room.gameNumber || 1) + 1;
+      recordGamePhaseStats('REPLAY');
       const prevSignatures = room.playedEventSignatures || [];
       const newScenario = buildScenarioForRoom({
         excludedSignatures: prevSignatures,
