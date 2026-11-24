@@ -3452,6 +3452,20 @@
   }
 
   const STATS_CACHE_KEY = 'ant_square_cumulative_stats_v1';
+  const VISITOR_ID_KEY = 'ant_square_visitor_id_v1';
+
+  function getOrCreateVisitorId() {
+    try {
+      let vid = sessionStorage.getItem(VISITOR_ID_KEY);
+      if (!vid) {
+        vid = `vis_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem(VISITOR_ID_KEY, vid);
+      }
+      return vid;
+    } catch (e) {
+      return 'vis_fallback';
+    }
+  }
 
   async function refreshEntryUsageStats() {
     const pill = $('entry-user-stats-pill');
@@ -3471,13 +3485,17 @@
 
     try {
       const qs = new URLSearchParams();
+      qs.set('visitorId', getOrCreateVisitorId());
       if (cachedTotal > 0) qs.set('clientTotal', String(cachedTotal));
       if (cachedGames > 0) qs.set('clientGames', String(cachedGames));
-      const url = qs.toString() ? `/api/stats?${qs.toString()}` : '/api/stats';
+      const url = `/api/stats?${qs.toString()}`;
       const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data && data.ok) {
-        const connected = (data.realtime && data.realtime.connectedHumanPlayers) || 0;
+        const connected = Math.max(
+          1,
+          (data.realtime && (data.realtime.currentOnlineUsers || data.realtime.connectedHumanPlayers)) || 1
+        );
         const total = Math.max(cachedTotal, (data.cumulative && data.cumulative.totalHumanParticipations) || 0);
         const games = Math.max(cachedGames, (data.cumulative && data.cumulative.totalGamesStarted) || 0);
         try {
@@ -3500,6 +3518,16 @@
     initBgm();
     refreshEntryUsageStats();
     setInterval(refreshEntryUsageStats, 15000);
+    window.addEventListener('pagehide', () => {
+      try {
+        const vid = sessionStorage.getItem(VISITOR_ID_KEY);
+        if (vid && navigator.sendBeacon) {
+          navigator.sendBeacon('/api/stats/leave-site', JSON.stringify({ visitorId: vid }));
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
 
     const saved = loadSession();
     if (saved && saved.roomCode && saved.participantId && saved.token) {

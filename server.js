@@ -13,6 +13,30 @@ const { prepareArticlesForYear, prewarmScenarioArticles } = require('./aiArticle
 
 const rooms = new Map(); // roomCode -> Room
 const sseClients = new Map(); // clientId -> { res, roomCode, participantId }
+const onlineVisitors = new Map(); // visitorId -> lastSeenTimestampMs (첫 화면 로비 접속자 포함 실시간 접속자 추적)
+const VISITOR_TTL_MS = 35000;
+
+function touchOnlineVisitor(visitorId) {
+  const now = Date.now();
+  for (const [vid, ts] of onlineVisitors.entries()) {
+    if (now - ts > VISITOR_TTL_MS) {
+      onlineVisitors.delete(vid);
+    }
+  }
+  if (visitorId && typeof visitorId === 'string') {
+    onlineVisitors.set(visitorId.slice(0, 64), now);
+  }
+}
+
+function getActiveOnlineVisitorCount() {
+  const now = Date.now();
+  for (const [vid, ts] of onlineVisitors.entries()) {
+    if (now - ts > VISITOR_TTL_MS) {
+      onlineVisitors.delete(vid);
+    }
+  }
+  return onlineVisitors.size;
+}
 
 // 이용자 수 및 게임 플레이 통계 데이터 (메모리 + 로컬 파일 + GitHub Gist 클라우드 영구 저장소 연동)
 // Render 무료 플랜이 슬립(Spin down) 후 재시작되거나 재배포되어도 클라우드 Gist에서 누적 통계를 자동 복원하고 이어서 카운트합니다.
@@ -271,9 +295,14 @@ function getUsageStatsSnapshot() {
     gamesCompleted: 0
   };
 
+  const onlineVisitorCount = getActiveOnlineVisitorCount();
+  const currentOnlineUsers = Math.max(connectedHumanPlayers, onlineVisitorCount);
+
   return {
     ok: true,
     realtime: {
+      currentOnlineUsers,
+      onlineVisitorCount,
       connectedHumanPlayers,
       activeHumanPlayers,
       activeRooms: rooms.size,
@@ -2103,6 +2132,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/api/stats') {
+    const visitorId = parsedUrl.searchParams.get('visitorId') || '';
+    if (visitorId) {
+      touchOnlineVisitor(visitorId);
+    }
     const clientTotal = Number(parsedUrl.searchParams.get('clientTotal')) || 0;
     const clientGames = Number(parsedUrl.searchParams.get('clientGames')) || 0;
     if (clientTotal > usageStats.totalHumanParticipations || clientGames > usageStats.totalGamesStarted) {
@@ -2113,6 +2146,18 @@ const server = http.createServer(async (req, res) => {
       scheduleCloudUsageStatsPush();
     }
     return sendJson(res, 200, getUsageStatsSnapshot());
+  }
+
+  if (req.method === 'POST' && pathname === '/api/stats/leave-site') {
+    try {
+      const body = await parseJsonBody(req);
+      if (body && body.visitorId) {
+        onlineVisitors.delete(String(body.visitorId).slice(0, 64));
+      }
+    } catch (e) {
+      // ignore
+    }
+    return sendJson(res, 200, { ok: true });
   }
 
   // 1. SSE 실시간 이벤트 스트림
