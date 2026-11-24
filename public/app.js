@@ -3197,6 +3197,7 @@
       saveSession(null);
       appState = null;
       renderAll();
+      refreshEntryUsageStats();
     });
 
     $('btn-start-game').addEventListener('click', async () => {
@@ -3418,7 +3419,14 @@
     });
 
     // 11 & 12. 최종 정산 홈으로 / 다시 플레이
-    $('btn-settlement-home').addEventListener('click', () => {
+    $('btn-settlement-home').addEventListener('click', async () => {
+      if (session) {
+        try {
+          await apiPost('/api/rooms/leave', session);
+        } catch (e) {
+          // ignore
+        }
+      }
       if (eventSource) {
         eventSource.close();
         eventSource = null;
@@ -3426,6 +3434,7 @@
       saveSession(null);
       appState = null;
       renderAll();
+      refreshEntryUsageStats();
     });
 
     $('btn-settlement-replay').addEventListener('click', async () => {
@@ -3437,20 +3446,45 @@
       if (data.ok && data.state) {
         applyServerState(data.state);
         showToast('새로운 시나리오로 대기방이 준비되었습니다.');
+        refreshEntryUsageStats();
       }
     });
   }
 
+  const STATS_CACHE_KEY = 'ant_square_cumulative_stats_v1';
+
   async function refreshEntryUsageStats() {
     const pill = $('entry-user-stats-pill');
     if (!pill) return;
+    let cachedTotal = 0;
+    let cachedGames = 0;
     try {
-      const res = await fetch('/api/stats');
+      const raw = localStorage.getItem(STATS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        cachedTotal = Number(parsed.total) || 0;
+        cachedGames = Number(parsed.games) || 0;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    try {
+      const qs = new URLSearchParams();
+      if (cachedTotal > 0) qs.set('clientTotal', String(cachedTotal));
+      if (cachedGames > 0) qs.set('clientGames', String(cachedGames));
+      const url = qs.toString() ? `/api/stats?${qs.toString()}` : '/api/stats';
+      const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data && data.ok) {
-        const connected = (data.realtime && data.realtime.activeHumanPlayers) || 0;
-        const total = (data.cumulative && data.cumulative.totalHumanParticipations) || 0;
-        const games = (data.cumulative && data.cumulative.totalGamesStarted) || 0;
+        const connected = (data.realtime && data.realtime.connectedHumanPlayers) || 0;
+        const total = Math.max(cachedTotal, (data.cumulative && data.cumulative.totalHumanParticipations) || 0);
+        const games = Math.max(cachedGames, (data.cumulative && data.cumulative.totalGamesStarted) || 0);
+        try {
+          localStorage.setItem(STATS_CACHE_KEY, JSON.stringify({ total, games }));
+        } catch (e) {
+          // ignore
+        }
         pill.textContent = `현재 ${connected.toLocaleString('ko-KR')}명 · 누적 ${total.toLocaleString('ko-KR')}명 (${games.toLocaleString('ko-KR')}판)`;
       }
     } catch (e) {

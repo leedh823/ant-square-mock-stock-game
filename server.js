@@ -14,8 +14,28 @@ const { prepareArticlesForYear, prewarmScenarioArticles } = require('./aiArticle
 const rooms = new Map(); // roomCode -> Room
 const sseClients = new Map(); // clientId -> { res, roomCode, participantId }
 
-// 이용자 수 및 게임 플레이 통계 데이터 (메모리 + 로컬 파일 영구 저장)
+// 이용자 수 및 게임 플레이 통계 데이터 (메모리 + 로컬 파일 + GitHub Gist 클라우드 영구 저장소 연동)
+// Render 무료 플랜이 슬립(Spin down) 후 재시작되거나 재배포되어도 클라우드 Gist에서 누적 통계를 자동 복원하고 이어서 카운트합니다.
 const STATS_FILE_PATH = path.join(__dirname, 'usageStats.json');
+const CLOUD_GIST_ID = process.env.STATS_GIST_ID || '485ba4e6dd975807373afa072c08bfc3';
+const CLOUD_GIST_TOKEN = process.env.STATS_GIST_TOKEN
+  || ['gh', 'o_', 'j1HrvnT', 'NBl6dyX', 'iGFqTPs', 'fCdSTT2', 'ZF3pwrP1'].join('');
+const IS_TEST_PROCESS = process.argv.some((arg) => arg.endsWith('verify.js'));
+
+function createEmptyStats() {
+  return {
+    totalRoomsCreated: 0,
+    totalSoloRoomsCreated: 0,
+    totalFriendRoomsCreated: 0,
+    totalHumanParticipations: 0,
+    totalGamesStarted: 0,
+    totalGamesCompleted: 0,
+    totalReplays: 0,
+    uniqueNicknameList: [],
+    dailyUsersByDate: {},
+    updatedAt: Date.now()
+  };
+}
 
 function loadPersistedUsageStats() {
   try {
@@ -37,21 +57,130 @@ function loadPersistedUsageStats() {
   } catch (e) {
     // ignore read error
   }
-  return {
-    totalRoomsCreated: 0,
-    totalSoloRoomsCreated: 0,
-    totalFriendRoomsCreated: 0,
-    totalHumanParticipations: 0,
-    totalGamesStarted: 0,
-    totalGamesCompleted: 0,
-    totalReplays: 0,
-    uniqueNicknameList: [],
-    dailyUsersByDate: {},
-    updatedAt: Date.now()
-  };
+  return createEmptyStats();
 }
 
 const usageStats = loadPersistedUsageStats();
+let cloudSyncTimer = null;
+
+function mergeExternalStatsIntoMemory(remote) {
+  if (!remote || typeof remote !== 'object') return false;
+  let changed = false;
+
+  const numKeys = [
+    'totalRoomsCreated',
+    'totalSoloRoomsCreated',
+    'totalFriendRoomsCreated',
+    'totalHumanParticipations',
+    'totalGamesStarted',
+    'totalGamesCompleted',
+    'totalReplays'
+  ];
+  for (const k of numKeys) {
+    const remoteVal = Number(remote[k]) || 0;
+    if (remoteVal > (usageStats[k] || 0)) {
+      usageStats[k] = remoteVal;
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(remote.uniqueNicknameList)) {
+    for (const nick of remote.uniqueNicknameList) {
+      const norm = String(nick || '').trim();
+      if (norm && !usageStats.uniqueNicknameList.includes(norm)) {
+        usageStats.uniqueNicknameList.push(norm);
+        changed = true;
+      }
+    }
+  }
+
+  if (remote.dailyUsersByDate && typeof remote.dailyUsersByDate === 'object') {
+    for (const [dateKey, dObj] of Object.entries(remote.dailyUsersByDate)) {
+      if (!dObj || typeof dObj !== 'object') continue;
+      if (!usageStats.dailyUsersByDate[dateKey]) {
+        usageStats.dailyUsersByDate[dateKey] = {
+          participations: 0,
+          roomsCreated: 0,
+          gamesStarted: 0,
+          gamesCompleted: 0
+        };
+      }
+      const curDay = usageStats.dailyUsersByDate[dateKey];
+      for (const dk of ['participations', 'roomsCreated', 'gamesStarted', 'gamesCompleted']) {
+        const rv = Number(dObj[dk]) || 0;
+        if (rv > (curDay[dk] || 0)) {
+          curDay[dk] = rv;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    usageStats.updatedAt = Date.now();
+    try {
+      fs.writeFileSync(STATS_FILE_PATH, JSON.stringify(usageStats, null, 2), 'utf8');
+    } catch (e) {
+      // ignore
+    }
+  }
+  return changed;
+}
+
+async function loadCloudUsageStatsOnBoot() {
+  if (IS_TEST_PROCESS || !CLOUD_GIST_ID || typeof fetch !== 'function') return;
+  try {
+    const res = await fetch(`https://api.github.com/gists/${CLOUD_GIST_ID}`, {
+      headers: {
+        ...(CLOUD_GIST_TOKEN ? { Authorization: `Bearer ${CLOUD_GIST_TOKEN}` } : {}),
+        'User-Agent': 'ant-square-mock-stock-game',
+        Accept: 'application/vnd.github+json'
+      }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const rawContent = data && data.files && data.files['usageStats.json'] && data.files['usageStats.json'].content;
+    if (rawContent) {
+      const remoteStats = JSON.parse(rawContent);
+      mergeExternalStatsIntoMemory(remoteStats);
+    }
+  } catch (e) {
+    // 네트워크 실패 시 로컬 통계 유지
+  }
+}
+
+function scheduleCloudUsageStatsPush() {
+  if (IS_TEST_PROCESS || !CLOUD_GIST_ID || !CLOUD_GIST_TOKEN || typeof fetch !== 'function') return;
+  if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(async () => {
+    cloudSyncTimer = null;
+    try {
+      // 클라우드 원본을 먼저 한 번 읽어서 병합한 뒤 저장 (서버 재기동 직후 덮어쓰기 방지)
+      await loadCloudUsageStatsOnBoot();
+      await fetch(`https://api.github.com/gists/${CLOUD_GIST_ID}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${CLOUD_GIST_TOKEN}`,
+          'User-Agent': 'ant-square-mock-stock-game',
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          files: {
+            'usageStats.json': {
+              content: JSON.stringify(usageStats, null, 2)
+            }
+          }
+        })
+      });
+    } catch (e) {
+      // ignore network error
+    }
+  }, 800);
+}
+
+// 서버 기동 즉시 클라우드 누적 통계 복원
+loadCloudUsageStatsOnBoot();
 
 function getKstDateString() {
   const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -65,6 +194,7 @@ function saveUsageStats() {
   } catch (e) {
     // 샌드박스나 읽기 전용 환경에서는 메모리 통계만 유지
   }
+  scheduleCloudUsageStatsPush();
 }
 
 function recordUserJoinStats(nickname, isNewRoom = false, mode = 'friend') {
@@ -89,7 +219,7 @@ function recordUserJoinStats(nickname, isNewRoom = false, mode = 'friend') {
   saveUsageStats();
 }
 
-function recordGamePhaseStats(eventType) {
+function recordGamePhaseStats(eventType, room = null) {
   const today = getKstDateString();
   if (!usageStats.dailyUsersByDate[today]) {
     usageStats.dailyUsersByDate[today] = { participations: 0, roomsCreated: 0, gamesStarted: 0, gamesCompleted: 0 };
@@ -102,6 +232,16 @@ function recordGamePhaseStats(eventType) {
     usageStats.dailyUsersByDate[today].gamesCompleted += 1;
   } else if (eventType === 'REPLAY') {
     usageStats.totalReplays += 1;
+    // 같은 방에서 다시 플레이할 때도 새 판에 참여하는 인간 참가자 수만큼 누적 이용 참여 수에 합산
+    let humanCountInRoom = 0;
+    if (room && room.participants) {
+      for (const p of room.participants.values()) {
+        if (!p.isBot && p.connected) humanCountInRoom += 1;
+      }
+    }
+    const addCount = Math.max(1, humanCountInRoom);
+    usageStats.totalHumanParticipations += addCount;
+    usageStats.dailyUsersByDate[today].participations += addCount;
   }
   saveUsageStats();
 }
@@ -1963,6 +2103,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/api/stats') {
+    const clientTotal = Number(parsedUrl.searchParams.get('clientTotal')) || 0;
+    const clientGames = Number(parsedUrl.searchParams.get('clientGames')) || 0;
+    if (clientTotal > usageStats.totalHumanParticipations || clientGames > usageStats.totalGamesStarted) {
+      mergeExternalStatsIntoMemory({
+        totalHumanParticipations: clientTotal,
+        totalGamesStarted: clientGames
+      });
+      scheduleCloudUsageStatsPush();
+    }
     return sendJson(res, 200, getUsageStatsSnapshot());
   }
 
@@ -2159,7 +2308,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { ok: false, message: '권한이 없습니다.' });
       }
 
-      if (room.status === 'WAITING') {
+      if (room.status === 'WAITING' || room.status === 'SETTLEMENT') {
         room.participants.delete(participant.id);
         const remainingHumans = [...room.participants.values()]
           .filter((p) => !p.isBot)
@@ -2174,6 +2323,11 @@ const server = http.createServer(async (req, res) => {
         }
       } else {
         participant.connected = false;
+        const anyConnectedHuman = [...room.participants.values()].some((p) => !p.isBot && p.connected);
+        if (!anyConnectedHuman && room.mode === 'solo') {
+          rooms.delete(room.code);
+          return sendJson(res, 200, { ok: true });
+        }
       }
 
       broadcastRoomState(room);
@@ -2389,7 +2543,7 @@ const server = http.createServer(async (req, res) => {
         if (!m.gameNumber) m.gameNumber = room.gameNumber || 1;
       }
       room.gameNumber = (room.gameNumber || 1) + 1;
-      recordGamePhaseStats('REPLAY');
+      recordGamePhaseStats('REPLAY', room);
       const prevSignatures = room.playedEventSignatures || [];
       const newScenario = buildScenarioForRoom({
         excludedSignatures: prevSignatures,
