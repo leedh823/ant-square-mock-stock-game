@@ -48,6 +48,8 @@ const IS_TEST_PROCESS = process.argv.some((arg) => arg.endsWith('verify.js'));
 
 function createEmptyStats() {
   return {
+    totalSiteVisits: 0,
+    visitedSessionIds: [],
     totalRoomsCreated: 0,
     totalSoloRoomsCreated: 0,
     totalFriendRoomsCreated: 0,
@@ -65,11 +67,14 @@ function loadPersistedUsageStats() {
   try {
     if (fs.existsSync(STATS_FILE_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(STATS_FILE_PATH, 'utf8'));
+      const totalHumanParticipations = Number(parsed.totalHumanParticipations) || 0;
       return {
+        totalSiteVisits: Math.max(Number(parsed.totalSiteVisits) || 0, totalHumanParticipations),
+        visitedSessionIds: Array.isArray(parsed.visitedSessionIds) ? parsed.visitedSessionIds.slice(-1000) : [],
         totalRoomsCreated: Number(parsed.totalRoomsCreated) || 0,
         totalSoloRoomsCreated: Number(parsed.totalSoloRoomsCreated) || 0,
         totalFriendRoomsCreated: Number(parsed.totalFriendRoomsCreated) || 0,
-        totalHumanParticipations: Number(parsed.totalHumanParticipations) || 0,
+        totalHumanParticipations,
         totalGamesStarted: Number(parsed.totalGamesStarted) || 0,
         totalGamesCompleted: Number(parsed.totalGamesCompleted) || 0,
         totalReplays: Number(parsed.totalReplays) || 0,
@@ -92,6 +97,7 @@ function mergeExternalStatsIntoMemory(remote) {
   let changed = false;
 
   const numKeys = [
+    'totalSiteVisits',
     'totalRoomsCreated',
     'totalSoloRoomsCreated',
     'totalFriendRoomsCreated',
@@ -105,6 +111,23 @@ function mergeExternalStatsIntoMemory(remote) {
     if (remoteVal > (usageStats[k] || 0)) {
       usageStats[k] = remoteVal;
       changed = true;
+    }
+  }
+  if ((usageStats.totalHumanParticipations || 0) > (usageStats.totalSiteVisits || 0)) {
+    usageStats.totalSiteVisits = usageStats.totalHumanParticipations;
+    changed = true;
+  }
+
+  if (Array.isArray(remote.visitedSessionIds)) {
+    for (const vid of remote.visitedSessionIds) {
+      const norm = String(vid || '').trim();
+      if (norm && !usageStats.visitedSessionIds.includes(norm)) {
+        usageStats.visitedSessionIds.push(norm);
+        changed = true;
+      }
+    }
+    if (usageStats.visitedSessionIds.length > 1000) {
+      usageStats.visitedSessionIds = usageStats.visitedSessionIds.slice(-1000);
     }
   }
 
@@ -221,6 +244,31 @@ function saveUsageStats() {
   scheduleCloudUsageStatsPush();
 }
 
+function recordSiteVisitStats(visitorId) {
+  const normVid = String(visitorId || '').trim().slice(0, 64);
+  if (!normVid) return;
+  if (!Array.isArray(usageStats.visitedSessionIds)) {
+    usageStats.visitedSessionIds = [];
+  }
+  if (usageStats.visitedSessionIds.includes(normVid)) {
+    return;
+  }
+  usageStats.visitedSessionIds.push(normVid);
+  if (usageStats.visitedSessionIds.length > 1000) {
+    usageStats.visitedSessionIds = usageStats.visitedSessionIds.slice(-1000);
+  }
+  usageStats.totalSiteVisits = Math.max(
+    (usageStats.totalSiteVisits || 0) + 1,
+    usageStats.totalHumanParticipations || 0
+  );
+  const today = getKstDateString();
+  if (!usageStats.dailyUsersByDate[today]) {
+    usageStats.dailyUsersByDate[today] = { siteVisits: 0, participations: 0, roomsCreated: 0, gamesStarted: 0, gamesCompleted: 0 };
+  }
+  usageStats.dailyUsersByDate[today].siteVisits = (usageStats.dailyUsersByDate[today].siteVisits || 0) + 1;
+  saveUsageStats();
+}
+
 function recordUserJoinStats(nickname, isNewRoom = false, mode = 'friend') {
   if (isNewRoom) {
     usageStats.totalRoomsCreated += 1;
@@ -228,6 +276,9 @@ function recordUserJoinStats(nickname, isNewRoom = false, mode = 'friend') {
     else usageStats.totalFriendRoomsCreated += 1;
   }
   usageStats.totalHumanParticipations += 1;
+  if ((usageStats.totalHumanParticipations || 0) > (usageStats.totalSiteVisits || 0)) {
+    usageStats.totalSiteVisits = usageStats.totalHumanParticipations;
+  }
   const norm = String(nickname || '').trim();
   if (norm && !usageStats.uniqueNicknameList.includes(norm)) {
     usageStats.uniqueNicknameList.push(norm);
@@ -311,6 +362,7 @@ function getUsageStatsSnapshot() {
       activeSseConnections: sseClients.size
     },
     cumulative: {
+      totalSiteVisits: Math.max(usageStats.totalSiteVisits || 0, usageStats.totalHumanParticipations || 0),
       totalHumanParticipations: usageStats.totalHumanParticipations,
       uniqueNicknameCount: usageStats.uniqueNicknameList.length,
       totalRoomsCreated: usageStats.totalRoomsCreated,
@@ -2135,12 +2187,16 @@ const server = http.createServer(async (req, res) => {
     const visitorId = parsedUrl.searchParams.get('visitorId') || '';
     if (visitorId) {
       touchOnlineVisitor(visitorId);
+      recordSiteVisitStats(visitorId);
     }
     const clientTotal = Number(parsedUrl.searchParams.get('clientTotal')) || 0;
     const clientGames = Number(parsedUrl.searchParams.get('clientGames')) || 0;
-    if (clientTotal > usageStats.totalHumanParticipations || clientGames > usageStats.totalGamesStarted) {
+    if (
+      clientTotal > (usageStats.totalSiteVisits || 0) ||
+      clientGames > (usageStats.totalGamesStarted || 0)
+    ) {
       mergeExternalStatsIntoMemory({
-        totalHumanParticipations: clientTotal,
+        totalSiteVisits: clientTotal,
         totalGamesStarted: clientGames
       });
       scheduleCloudUsageStatsPush();

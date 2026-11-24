@@ -3496,7 +3496,8 @@
           1,
           (data.realtime && (data.realtime.currentOnlineUsers || data.realtime.connectedHumanPlayers)) || 1
         );
-        const total = Math.max(cachedTotal, (data.cumulative && data.cumulative.totalHumanParticipations) || 0);
+        const remoteTotal = (data.cumulative && (data.cumulative.totalSiteVisits || data.cumulative.totalHumanParticipations)) || 0;
+        const total = Math.max(cachedTotal, remoteTotal);
         const games = Math.max(cachedGames, (data.cumulative && data.cumulative.totalGamesStarted) || 0);
         try {
           localStorage.setItem(STATS_CACHE_KEY, JSON.stringify({ total, games }));
